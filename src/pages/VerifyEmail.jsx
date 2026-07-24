@@ -37,29 +37,53 @@ function VerifyEmail() {
       }
 
       try {
+        console.group("VerifyEmail :: updateVerification");
+        console.log("userId:", userId);
+        console.log("secret:", secret);
+        console.log("hasVerified.current (before):", hasVerified.current);
         hasVerified.current = true;
-        await authService.updateVerification(userId, secret);
+        console.log("hasVerified.current (after):", hasVerified.current);
+        console.log("Calling authService.updateVerification()...");
+        const result = await authService.updateVerification(userId, secret);
+        console.log("Verification success - result:", result);
+        console.groupEnd();
         setStatus(STATUS.SUCCESS);
       } catch (error) {
-        const msg = error.message || "";
+        console.log("Verification error object:", error);
+        console.log("error.name:", error.name);
+        console.log("error.message:", error.message);
+        console.log("error.code:", error.code);
+        console.log("error.type:", error.type);
+        console.log("error.response:", error.response);
+        console.log("error.stack:", error.stack);
+        console.groupEnd();
+
+        const msg = (error && (error.message || error.response || String(error))) || "";
+        const msgLower = msg.toLowerCase();
+
+        console.log("Normalized error message for matching:", msgLower);
+
         // Handle "already verified" error
         if (
-          msg.toLowerCase().includes("already verified") ||
-          msg.toLowerCase().includes("user is already verified")
+          msgLower.includes("already verified") ||
+          msgLower.includes("user is already verified")
         ) {
+          console.log("Matched: already verified");
           setStatus(STATUS.ALREADY_VERIFIED);
         }
         // Handle expired/invalid link
         else if (
-          msg.toLowerCase().includes("invalid") ||
-          msg.toLowerCase().includes("expired") ||
-          msg.toLowerCase().includes("not found")
+          msgLower.includes("invalid") ||
+          msgLower.includes("expired") ||
+          msgLower.includes("not found")
         ) {
+          console.log("Matched: invalid/expired");
           setStatus(STATUS.ERROR);
           setErrorMessage(
             "This verification link is invalid or has expired."
           );
         } else {
+          console.log("No match - falling to generic error");
           setStatus(STATUS.ERROR);
           setErrorMessage(msg || "Verification failed. Please try again.");
         }
