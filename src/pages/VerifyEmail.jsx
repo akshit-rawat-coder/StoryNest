@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import authService from "../appwrite/auth";
-import { Button, Logo, Loader } from "../components";
+import { Button, Loader } from "../components";
 
 const STATUS = {
   LOADING: "loading",
@@ -12,50 +12,15 @@ const STATUS = {
 
 function VerifyEmail() {
   const [searchParams] = useSearchParams();
-  const [status, setStatus] = useState(STATUS.LOADING);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
-  const [resendMessage, setResendMessage] = useState("");
-  const cooldownRef = useRef(null);
+  const [status, setStatus] = React.useState(STATUS.LOADING);
+  const [errorMessage, setErrorMessage] = React.useState("");
   const hasVerified = useRef(false);
 
   const userId = searchParams.get("userId");
   const secret = searchParams.get("secret");
 
-  const startResendCooldown = useCallback(() => {
-    setResendCooldown(30);
-    cooldownRef.current = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(cooldownRef.current);
-          cooldownRef.current = null;
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
-
-  const handleResendVerification = async () => {
-    if (resendCooldown > 0) return;
-    setResendLoading(true);
-    setResendMessage("");
-    try {
-      await authService.sendVerificationEmail();
-      setResendMessage("Verification email sent successfully! Check your inbox.");
-      startResendCooldown();
-    } catch (error) {
-      const msg = error.message || "Failed to resend verification email.";
-      // Handle "already verified" case when trying to resend
-      if (msg.toLowerCase().includes("already verified")) {
-        setStatus(STATUS.ALREADY_VERIFIED);
-      } else {
-        setResendMessage(msg);
-      }
-    } finally {
-      setResendLoading(false);
-    }
+  const navigateToLogin = () => {
+    window.location.href = "/login";
   };
 
   useEffect(() => {
@@ -205,7 +170,8 @@ function VerifyEmail() {
     );
   }
 
-  // Error State - Invalid or Expired Link with Resend Button
+  // Error State - Invalid or Expired Link
+  // Navigates users to login, where they can resend verification after authenticating
   return (
     <div className="w-full">
       <div className="mx-auto flex min-h-[calc(100vh-8rem)] w-full max-w-lg items-center justify-center p-6 sm:p-10 lg:p-12">
@@ -232,28 +198,12 @@ function VerifyEmail() {
             {errorMessage || "This verification link is invalid or has expired."}
           </p>
 
-          {resendMessage && (
-            <p
-              className={`mb-4 rounded-xl border px-3 py-2 text-sm font-medium ${
-                resendMessage.includes("successfully")
-                  ? "border-green-200 bg-green-50 text-green-700 dark:border-green-400/30 dark:bg-green-500/15 dark:text-green-200"
-                  : "border-red-200 bg-red-50 text-red-700 dark:border-red-400/30 dark:bg-red-500/15 dark:text-red-200"
-              }`}
-            >
-              {resendMessage}
-            </p>
-          )}
-
           <Button
             type="button"
             className="mb-4 w-full justify-center"
-            loading={resendLoading}
-            disabled={resendCooldown > 0}
-            onClick={handleResendVerification}
+            onClick={navigateToLogin}
           >
-            {resendCooldown > 0
-              ? `Resend in ${resendCooldown}s`
-              : "Resend Verification Email"}
+            Resend Verification Email
           </Button>
 
           <Link

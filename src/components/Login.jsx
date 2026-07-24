@@ -16,7 +16,6 @@ function Login() {
   const [resendLoading, setResendLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendMessage, setResendMessage] = useState("");
-  const [pendingCredentials, setPendingCredentials] = useState(null);
   const cooldownRef = useRef(null);
 
   const startResendCooldown = useCallback(() => {
@@ -34,12 +33,12 @@ function Login() {
   }, []);
 
   const handleResendVerification = async () => {
-    if (resendCooldown > 0 || !pendingCredentials) return;
+    if (resendCooldown > 0) return;
     setResendLoading(true);
     setResendMessage("");
     try {
-      // Uses the temporarily stored credentials to authenticate and send verification
-      await authService.resendVerification(pendingCredentials);
+      // Use the active session (user is already logged in) to resend verification
+      await authService.sendVerificationEmail();
       setResendMessage("Verification email sent successfully!");
       startResendCooldown();
     } catch (error) {
@@ -60,10 +59,7 @@ function Login() {
         if (userData) {
           // Check if email is verified
           if (!userData.emailVerification) {
-            // Logout immediately and show verification required message
-            await authService.deleteSession();
-            // Store credentials for resend verification
-            setPendingCredentials({ email: data.email, password: data.password });
+            // Session is active — keep it for resend, show verification screen
             setVerifyRequired(true);
           } else {
             dispatch(authLogin({ userData }));
@@ -124,7 +120,10 @@ function Login() {
 
             <button
               type="button"
-              onClick={() => setVerifyRequired(false)}
+              onClick={async () => {
+                await authService.deleteSession();
+                setVerifyRequired(false);
+              }}
               className="inline-block text-sm font-medium text-indigo-600 transition-colors duration-200 hover:text-indigo-700 hover:underline dark:text-indigo-300 dark:hover:text-indigo-200"
             >
               Back to Login
