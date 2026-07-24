@@ -1,6 +1,7 @@
 import React from 'react'
 import appwriteService from "../appwrite/config"
 import { Link, useNavigate } from 'react-router-dom'
+import { PhotoProvider, PhotoView } from "react-photo-view";
 
 function PostCard({ $id, title, featuredImage, status, category, tags, content }) {
   const navigate = useNavigate();
@@ -25,11 +26,19 @@ function PostCard({ $id, title, featuredImage, status, category, tags, content }
     <Link to={`/post/${$id}`} className="block h-full">
         <div className='group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900'>
             <div className='relative aspect-video w-full overflow-hidden bg-slate-100 dark:bg-slate-800'>
-                <img
-                  src={appwriteService.getFilePreview(featuredImage)}
-                  alt={title}
-                  className='h-full w-full object-cover transition-transform duration-300 group-hover:scale-105'
-                />
+                <PhotoProvider maskOpacity={0.85} bannerVisible={false} loop={false}>
+                    <PhotoView src={appwriteService.getFilePreview(featuredImage)}>
+                        <img
+                          src={appwriteService.getFilePreview(featuredImage)}
+                          alt={title}
+                          className='h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-105'
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        />
+                    </PhotoView>
+                </PhotoProvider>
                 {badgeText && (
                   <button
                     onClick={(e) => handleFilterClick(e, "category", badgeText)}

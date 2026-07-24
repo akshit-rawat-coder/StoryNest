@@ -4,6 +4,8 @@ import appwriteService from "../appwrite/config";
 import { Button, Container, Loader, PostCard } from "../components";
 import parse from "html-react-parser";
 import { useSelector } from "react-redux";
+import { PhotoProvider, PhotoView } from "react-photo-view";
+import "react-photo-view/dist/react-photo-view.css";
 import PostSocialActions from "../components/social/PostSocialActions";
 import Comments from "../components/social/Comments";
 
@@ -101,8 +103,20 @@ export default function Post() {
         <div className="py-8 md:py-12">
             <Container>
                 <section className="relative mb-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="aspect-[21/9] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                        <img src={appwriteService.getFilePreview(post.featuredImage)} alt={post.title} className="h-full w-full object-cover" />
+<div className="aspect-[21/9] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                        <PhotoProvider
+                            maskOpacity={0.85}
+                            bannerVisible={false}
+                            loop={false}
+                        >
+                            <PhotoView src={appwriteService.getFilePreview(post.featuredImage)}>
+                                <img
+                                    src={appwriteService.getFilePreview(post.featuredImage)}
+                                    alt={post.title}
+                                    className="h-full w-full cursor-pointer object-cover transition-transform duration-300 hover:scale-[1.02]"
+                                />
+                            </PhotoView>
+                        </PhotoProvider>
                     </div>
                     <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent" />
                     {isAuthor && <div className="absolute right-4 top-4 flex gap-2 md:right-6 md:top-6">
