@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState } from "react";
 import authService from "../appwrite/auth";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Input, Logo } from "./index.js";
@@ -9,57 +9,18 @@ function Signup() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [accountCreated, setAccountCreated] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
-  const [resendMessage, setResendMessage] = useState("");
-  const cooldownRef = useRef(null);
   const { register, handleSubmit } = useForm();
-
-  const startResendCooldown = useCallback(() => {
-    setResendCooldown(30);
-    cooldownRef.current = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(cooldownRef.current);
-          cooldownRef.current = null;
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
 
   const create = async (data) => {
     setError("");
     setIsLoading(true);
     try {
       await authService.createAccount(data);
-      // Appwrite creates a session on account.create, delete it since user must verify first
-      await authService.deleteSession();
       setAccountCreated(true);
     } catch (error) {
       setError(error.message || "Failed to create account. Please try again.");
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleResendVerification = async () => {
-    if (resendCooldown > 0) return;
-    setResendLoading(true);
-    setResendMessage("");
-    try {
-      await authService.sendVerificationEmail();
-      setResendMessage("Verification email sent successfully!");
-      startResendCooldown();
-    } catch (error) {
-      setResendMessage(
-        error.message === "User (role: guests) missing scope (account)"
-          ? "Please log in first to resend the verification email."
-          : error.message || "Failed to resend verification email."
-      );
-    } finally {
-      setResendLoading(false);
     }
   };
 
@@ -83,33 +44,9 @@ function Signup() {
               Please verify your email before logging in.
             </p>
 
-            {resendMessage && (
-              <p
-                className={`mb-4 rounded-xl border px-3 py-2 text-sm font-medium ${
-                  resendMessage.includes("successfully")
-                    ? "border-green-200 bg-green-50 text-green-700 dark:border-green-400/30 dark:bg-green-500/15 dark:text-green-200"
-                    : "border-red-200 bg-red-50 text-red-700 dark:border-red-400/30 dark:bg-red-500/15 dark:text-red-200"
-                }`}
-              >
-                {resendMessage}
-              </p>
-            )}
-
-            <Button
-              type="button"
-              className="mb-4 w-full justify-center"
-              loading={resendLoading}
-              disabled={resendCooldown > 0}
-              onClick={handleResendVerification}
-            >
-              {resendCooldown > 0
-                ? `Resend in ${resendCooldown}s`
-                : "Resend Verification Email"}
-            </Button>
-
             <Link
               to="/login"
-              className="inline-block text-sm font-medium text-indigo-600 transition-colors duration-200 hover:text-indigo-700 hover:underline dark:text-indigo-300 dark:hover:text-indigo-200"
+              className="inline-block rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-indigo-700 hover:shadow-md"
             >
               Go to Login
             </Link>

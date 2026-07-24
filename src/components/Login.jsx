@@ -16,6 +16,7 @@ function Login() {
   const [resendLoading, setResendLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendMessage, setResendMessage] = useState("");
+  const [pendingCredentials, setPendingCredentials] = useState(null);
   const cooldownRef = useRef(null);
 
   const startResendCooldown = useCallback(() => {
@@ -33,11 +34,12 @@ function Login() {
   }, []);
 
   const handleResendVerification = async () => {
-    if (resendCooldown > 0) return;
+    if (resendCooldown > 0 || !pendingCredentials) return;
     setResendLoading(true);
     setResendMessage("");
     try {
-      await authService.sendVerificationEmail();
+      // Uses the temporarily stored credentials to authenticate and send verification
+      await authService.resendVerification(pendingCredentials);
       setResendMessage("Verification email sent successfully!");
       startResendCooldown();
     } catch (error) {
@@ -60,6 +62,8 @@ function Login() {
           if (!userData.emailVerification) {
             // Logout immediately and show verification required message
             await authService.deleteSession();
+            // Store credentials for resend verification
+            setPendingCredentials({ email: data.email, password: data.password });
             setVerifyRequired(true);
           } else {
             dispatch(authLogin({ userData }));

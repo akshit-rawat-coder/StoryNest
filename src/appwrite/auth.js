@@ -44,6 +44,24 @@ async createAccount({ email, password, name }) {
     return await this.account.createVerification(url);
   }
 
+  /**
+   * Resend verification email by temporarily authenticating the user.
+   * Appwrite v26 requires an active session for account.createVerification().
+   * This method creates a session, sends the email, then deletes the session.
+   */
+  async resendVerification({ email, password }) {
+    // Create temporary session
+    await this.account.createEmailPasswordSession({
+      email,
+      password,
+    });
+    // Send verification email (requires authenticated session)
+    const result = await this.sendVerificationEmail();
+    // Delete the temporary session
+    await this.deleteSession();
+    return result;
+  }
+
   async updateVerification(userId, secret) {
     return await this.account.updateVerification(userId, secret);
   }
