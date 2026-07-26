@@ -26,19 +26,30 @@ function PostCard({ $id, title, featuredImage, status, category, tags, content }
     <Link to={`/post/${$id}`} className="block h-full">
         <div className='group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900'>
             <div className='relative aspect-video w-full overflow-hidden bg-slate-100 dark:bg-slate-800'>
-                <PhotoProvider maskOpacity={0.85} bannerVisible={false} loop={false}>
-                    <PhotoView src={appwriteService.getFilePreview(featuredImage)}>
-                        <img
-                          src={appwriteService.getFilePreview(featuredImage)}
-                          alt={title}
-                          className='h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-105'
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                        />
-                    </PhotoView>
-                </PhotoProvider>
+                {featuredImage ? (
+                    <PhotoProvider maskOpacity={0.85} bannerVisible={false} loop={false}>
+                        <PhotoView src={appwriteService.getFilePreview(featuredImage)}>
+                            <img
+                              src={appwriteService.getFilePreview(featuredImage)}
+                              alt={title}
+                              className='h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-105'
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                            />
+                        </PhotoView>
+                    </PhotoProvider>
+                ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-50 to-slate-100 dark:from-slate-800 dark:to-slate-900">
+                        <div className="flex flex-col items-center gap-1 text-slate-400 dark:text-slate-500">
+                            <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                            </svg>
+                            <span className="text-[10px] font-medium">No image</span>
+                        </div>
+                    </div>
+                )}
                 {badgeText && (
                   <button
                     onClick={(e) => handleFilterClick(e, "category", badgeText)}

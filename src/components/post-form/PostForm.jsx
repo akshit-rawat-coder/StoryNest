@@ -80,31 +80,44 @@ export default function PostForm({ post }) {
                     setIsUploadingImage(false);
                     if (file) {
                         fileId = file.$id;
-                        appwriteService.deleteFile(post.featuredImage);
+                        // Delete old image only if it exists
+                        if (post.featuredImage) {
+                            appwriteService.deleteFile(post.featuredImage);
+                        }
                     }
                 }
 
-                const dbPost = await appwriteService.updatePost(post.$id, {
-                    ...postDetails,
-                    featuredImage: fileId,
-                });
+                const updateData = { ...postDetails };
+                // Only set featuredImage if a new file was uploaded
+                if (fileId !== undefined) {
+                    updateData.featuredImage = fileId;
+                }
+                // If no new file selected, keep the existing featuredImage (don't send undefined)
+
+                const dbPost = await appwriteService.updatePost(post.$id, updateData);
 
                 if (dbPost) {
                     navigate(`/post/${dbPost.$id}`);
                 }
             } else {
-                setIsUploadingImage(true);
-                const file = await appwriteService.uploadFile(data.image[0]);
-                setIsUploadingImage(false);
-
-                if (file) {
-                    const fileId = file.$id;
-                    postDetails.featuredImage = fileId;
-                    const dbPost = await appwriteService.createPost({ ...postDetails, userId: userData.$id });
-
-                    if (dbPost) {
-                        navigate(`/post/${dbPost.$id}`);
+                // Create new post
+                if (data.image?.[0]) {
+                    setIsUploadingImage(true);
+                    const file = await appwriteService.uploadFile(data.image[0]);
+                    setIsUploadingImage(false);
+                    if (file) {
+                        postDetails.featuredImage = file.$id;
+                    } else {
+                        postDetails.featuredImage = null;
                     }
+                } else {
+                    postDetails.featuredImage = null;
+                }
+
+                const dbPost = await appwriteService.createPost({ ...postDetails, userId: userData.$id });
+
+                if (dbPost) {
+                    navigate(`/post/${dbPost.$id}`);
                 }
             }
         } catch (error) {
@@ -177,17 +190,17 @@ export default function PostForm({ post }) {
                     </div>
 
                     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/70">
-                        <Input
+                    <Input
                             label="Featured Image :"
                             type="file"
                             className="cursor-pointer file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-700"
                             accept="image/png, image/jpg, image/jpeg, image/gif"
-                            {...register("image", { required: !post })}
+                            {...register("image")}
                         />
                         <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Drag & drop visual area (upload logic unchanged).</p>
                     </div>
 
-                    {(isEditMode || watch("image")?.[0]) && (
+                    {(post?.featuredImage || watch("image")?.[0]) && (
                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
                             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Preview</p>
                             {isUploadingImage ? (
@@ -195,13 +208,13 @@ export default function PostForm({ post }) {
                                     <ThreeDot color="#6366F1" size="small" />
                                     <p className="text-xs text-slate-500 dark:text-slate-400">Uploading image...</p>
                                 </div>
-                            ) : post ? (
+                            ) : post?.featuredImage ? (
                                 <img
                                     src={appwriteService.getFilePreview(post.featuredImage)}
                                     alt={post.title}
                                     className="w-full rounded-lg object-cover"
                                 />
-                            ) :watch("image")?.[0] ? (
+                            ) : watch("image")?.[0] ? (
     <img
         src={URL.createObjectURL(watch("image")[0])}
         alt="Preview"

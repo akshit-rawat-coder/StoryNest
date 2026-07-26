@@ -73,7 +73,9 @@ export default function Post() {
         try {
             const status = await appwriteService.deletePost(post.$id);
             if (status) {
-                appwriteService.deleteFile(post.featuredImage);
+                if (post.featuredImage) {
+                    appwriteService.deleteFile(post.featuredImage);
+                }
                 navigate("/");
             }
         } catch (error) {
@@ -103,21 +105,28 @@ export default function Post() {
         <div className="py-8 md:py-12">
             <Container>
                 <section className="relative mb-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-<div className="aspect-[21/9] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                        <PhotoProvider
-                            maskOpacity={0.85}
-                            bannerVisible={false}
-                            loop={false}
-                        >
-                            <PhotoView src={appwriteService.getFilePreview(post.featuredImage)}>
-                                <img
-                                    src={appwriteService.getFilePreview(post.featuredImage)}
-                                    alt={post.title}
-                                    className="h-full w-full cursor-pointer object-cover transition-transform duration-300 hover:scale-[1.02]"
-                                />
-                            </PhotoView>
-                        </PhotoProvider>
-                    </div>
+                    {post.featuredImage ? (
+                        <div className="aspect-[21/9] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                            <PhotoProvider maskOpacity={0.85} bannerVisible={false} loop={false}>
+                                <PhotoView src={appwriteService.getFilePreview(post.featuredImage)}>
+                                    <img
+                                        src={appwriteService.getFilePreview(post.featuredImage)}
+                                        alt={post.title}
+                                        className="h-full w-full cursor-pointer object-cover transition-transform duration-300 hover:scale-[1.02]"
+                                    />
+                                </PhotoView>
+                            </PhotoProvider>
+                        </div>
+                    ) : (
+                        <div className="flex aspect-[21/9] w-full items-center justify-center bg-gradient-to-br from-indigo-50 via-slate-50 to-slate-100 dark:from-slate-800 dark:via-slate-900 dark:to-slate-950">
+                            <div className="flex flex-col items-center gap-3 text-slate-400 dark:text-slate-600">
+                                <svg className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                                </svg>
+                                <span className="text-sm font-medium">No featured image</span>
+                            </div>
+                        </div>
+                    )}
                     <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent" />
                     {isAuthor && <div className="absolute right-4 top-4 flex gap-2 md:right-6 md:top-6">
                         <Link to={`/edit-post/${post.$id}`}><Button bgColor="bg-emerald-600" className="px-3 py-2 text-sm hover:bg-emerald-700">Edit</Button></Link>
