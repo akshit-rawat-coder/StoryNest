@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Container, PostCard } from "../components";
 import appwriteService from "../appwrite/config";
 import { useSearchParams } from "react-router-dom";
+import usePollingPosts from "../hooks/usePollingPosts";
 
 const CATEGORIES = [
   "React",
@@ -32,15 +33,42 @@ function AllPosts() {
   const categoryFilter = searchParams.get("category") || "all";
   const tagFilter = searchParams.get("tag") || "";
 
-  useEffect(() => {
-    setIsLoading(true);
-    appwriteService.getPosts().then((response) => {
+  // Track whether this is the very first load (show skeleton) or a background poll (silent update).
+  const isFirstLoadRef = useRef(true);
+  // Keep a JSON snapshot of the previous posts to avoid unnecessary setState calls.
+  const prevSnapshotRef = useRef("");
+
+  // Memoize the fetch function so it can be passed to the polling hook by reference.
+  const fetchPosts = useCallback(async () => {
+    // Only show the loading skeleton during the very first fetch.
+    if (isFirstLoadRef.current) {
+      setIsLoading(true);
+    }
+
+    try {
+      const response = await appwriteService.getPosts();
       if (response) {
-        setPosts(response.rows || []);
+        const newPosts = response.rows || [];
+        // Build a snapshot to compare against the previous state.
+        // Only call setPosts when the data has actually changed.
+        const newSnapshot = JSON.stringify(newPosts);
+        if (newSnapshot !== prevSnapshotRef.current) {
+          prevSnapshotRef.current = newSnapshot;
+          setPosts(newPosts);
+        }
       }
-      setIsLoading(false);
-    });
+    } catch {
+      // Silently swallow — errors are handled by the loading/empty state UI.
+    } finally {
+      if (isFirstLoadRef.current) {
+        isFirstLoadRef.current = false;
+        setIsLoading(false);
+      }
+    }
   }, []);
+
+  // Initial fetch + poll every 10 seconds.
+  usePollingPosts(fetchPosts, 10000, true);
 
   // Reset to page 1 when any filter changes
   useEffect(() => {

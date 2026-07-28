@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useSelector } from "react-redux";
 import { Link } from "react-router-dom";
 import appwriteService from "../appwrite/config";
 import socialService from "../appwrite/social";
 import conf from "../conf/conf";
 import { Container, PostCard } from "../components";
+import usePollingPosts from "../hooks/usePollingPosts";
 
 function Home() {
   const [posts, setPosts] = useState([]);
@@ -12,82 +13,109 @@ function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const authStatus = useSelector((state) => state.auth.status);
 
-  useEffect(() => {
-    const fetchPosts = async () => {
-      if (!authStatus) {
-        setPosts([]);
-        setTrendingPosts([]);
-        setIsLoading(false);
-        return;
-      }
+  // Track whether this is the very first load (show skeleton) or a background poll (silent update).
+  const isFirstLoadRef = useRef(true);
+  // Keep a JSON snapshot of the previous posts + trending to avoid unnecessary setState calls.
+  const prevSnapshotRef = useRef("");
 
+  // Memoize the fetch function so it can be passed to the polling hook by reference.
+  const fetchPosts = useCallback(async () => {
+    if (!authStatus) {
+      setPosts([]);
+      setTrendingPosts([]);
+      setIsLoading(false);
+      return;
+    }
+
+    // Only show the loading skeleton during the very first fetch.
+    if (isFirstLoadRef.current) {
       setIsLoading(true);
-      try {
-        const response = await appwriteService.getPosts();
+    }
 
-        if (response && response.rows) {
-          const activePosts = response.rows.filter(p => p.status === "active");
-          setPosts(activePosts);
+    try {
+      const response = await appwriteService.getPosts();
 
-          // Calculate Trending Posts (top 5)
-          let computedTrending = [];
-          if (activePosts.length > 0) {
-            // Check if DB contains pre-calculated aggregate counters
-            if ("likesCount" in activePosts[0] && "viewsCount" in activePosts[0]) {
-              computedTrending = [...activePosts]
-                .sort((a, b) => (b.likesCount - a.likesCount) || (b.viewsCount - a.viewsCount))
-                .slice(0, 5);
-            } else {
-              // Fallback: Fetch Likes and Views records and aggregate counts
-              try {
-                const [likesRes, viewsRes] = await Promise.all([
-                  socialService.listRows(conf.appwriteLikesTableId, []),
-                  socialService.listRows(conf.appwriteViewsTableId, []),
-                ]);
+      if (response && response.rows) {
+        const activePosts = response.rows.filter(p => p.status === "active");
 
-                const likesRows = likesRes?.rows || [];
-                const viewsRows = viewsRes?.rows || [];
+        // Calculate Trending Posts (top 5)
+        let computedTrending = [];
+        if (activePosts.length > 0) {
+          // Check if DB contains pre-calculated aggregate counters
+          if ("likesCount" in activePosts[0] && "viewsCount" in activePosts[0]) {
+            computedTrending = [...activePosts]
+              .sort((a, b) => (b.likesCount - a.likesCount) || (b.viewsCount - a.viewsCount))
+              .slice(0, 5);
+          } else {
+            // Fallback: Fetch Likes and Views records and aggregate counts
+            try {
+              const [likesRes, viewsRes] = await Promise.all([
+                socialService.listRows(conf.appwriteLikesTableId, []),
+                socialService.listRows(conf.appwriteViewsTableId, []),
+              ]);
 
-                const likesMap = {};
-                const viewsMap = {};
+              const likesRows = likesRes?.rows || [];
+              const viewsRows = viewsRes?.rows || [];
 
-                likesRows.forEach(row => {
-                  likesMap[row.postId] = (likesMap[row.postId] || 0) + 1;
-                });
+              const likesMap = {};
+              const viewsMap = {};
 
-                viewsRows.forEach(row => {
-                  viewsMap[row.postId] = (viewsMap[row.postId] || 0) + 1;
-                });
+              likesRows.forEach(row => {
+                likesMap[row.postId] = (likesMap[row.postId] || 0) + 1;
+              });
 
-                computedTrending = activePosts.map(post => ({
-                  ...post,
-                  likesCount: likesMap[post.$id] || 0,
-                  viewsCount: viewsMap[post.$id] || 0,
-                }))
-                .sort((a, b) => (b.likesCount - a.likesCount) || (b.viewsCount - a.viewsCount))
-                .slice(0, 5);
-              } catch (err) {
-                console.error("Failed to compute trending posts fallback", err);
-                // Muted fallback
-                computedTrending = activePosts.slice(0, 5);
-              }
+              viewsRows.forEach(row => {
+                viewsMap[row.postId] = (viewsMap[row.postId] || 0) + 1;
+              });
+
+              computedTrending = activePosts.map(post => ({
+                ...post,
+                likesCount: likesMap[post.$id] || 0,
+                viewsCount: viewsMap[post.$id] || 0,
+              }))
+              .sort((a, b) => (b.likesCount - a.likesCount) || (b.viewsCount - a.viewsCount))
+              .slice(0, 5);
+            } catch (err) {
+              console.error("Failed to compute trending posts fallback", err);
+              // Muted fallback
+              computedTrending = activePosts.slice(0, 5);
             }
           }
+        }
+
+        // Build a snapshot string to compare against the previous one.
+        // Only update state when the data has actually changed.
+        const newSnapshot = JSON.stringify({ posts: activePosts, trending: computedTrending });
+        if (newSnapshot !== prevSnapshotRef.current) {
+          prevSnapshotRef.current = newSnapshot;
+          setPosts(activePosts);
           setTrendingPosts(computedTrending);
-        } else {
+        }
+      } else {
+        const emptySnapshot = JSON.stringify({ posts: [], trending: [] });
+        if (emptySnapshot !== prevSnapshotRef.current) {
+          prevSnapshotRef.current = emptySnapshot;
           setPosts([]);
           setTrendingPosts([]);
         }
-      } catch {
+      }
+    } catch {
+      const emptySnapshot = JSON.stringify({ posts: [], trending: [] });
+      if (emptySnapshot !== prevSnapshotRef.current) {
+        prevSnapshotRef.current = emptySnapshot;
         setPosts([]);
         setTrendingPosts([]);
-      } finally {
+      }
+    } finally {
+      if (isFirstLoadRef.current) {
+        isFirstLoadRef.current = false;
         setIsLoading(false);
       }
-    };
-
-    fetchPosts();
+    }
   }, [authStatus]);
+
+  // Poll every 10 seconds. Only poll when the user is authenticated.
+  usePollingPosts(fetchPosts, 10000, !!authStatus);
 
   if (!authStatus) {
     return (
