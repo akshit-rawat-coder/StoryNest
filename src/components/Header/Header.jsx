@@ -61,8 +61,6 @@ function Header() {
   const primaryNavItems = useMemo(() => {
     const loggedOutItems = [
       { name: "Home", slug: "/" },
-      { name: "Login", slug: "/login" },
-      { name: "Signup", slug: "/signup" },
     ];
 
     const loggedInItems = [

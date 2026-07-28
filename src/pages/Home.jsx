@@ -5,6 +5,7 @@ import appwriteService from "../appwrite/config";
 import socialService from "../appwrite/social";
 import conf from "../conf/conf";
 import { Container, PostCard } from "../components";
+import TextType from "../components/TextType/TextType";
 import usePollingPosts from "../hooks/usePollingPosts";
 
 function Home() {
@@ -126,14 +127,31 @@ function Home() {
               Welcome to StoryNest
             </p>
             <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 dark:text-white md:text-4xl">
-              Your stories, beautifully organized.
+              Your{" "}
+              <TextType
+                texts={[
+                  "stories, beautifully organized.",
+                  "ideas, shared with everyone.",
+                  "thoughts, brought to life.",
+                  "writing, made memorable.",
+                ]}
+                typingSpeed={70}
+                deletingSpeed={35}
+                pauseDuration={1800}
+                showCursor={true}
+                cursorCharacter="|"
+                loop={true}
+              />
             </h1>
             <p className="mx-auto mt-3 max-w-2xl text-base text-slate-600 dark:text-slate-300">
               Sign in to explore posts, publish your ideas, and manage your personal writing space.
             </p>
-            <div className="mt-8 inline-flex rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/20 dark:text-indigo-200">
+            <Link
+              to="/login"
+              className="mt-8 inline-flex rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-indigo-500/30 dark:bg-indigo-500/20 dark:text-indigo-200 dark:focus:ring-indigo-400 dark:focus:ring-offset-slate-950"
+            >
               Login to read posts
-            </div>
+            </Link>
           </section>
         </Container>
       </div>

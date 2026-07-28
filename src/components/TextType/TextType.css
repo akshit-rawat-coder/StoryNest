@@ -1,0 +1,23 @@
+/* TextType — React Bits Typing Animation */
+.text-type-container {
+  display: inline;
+  position: relative;
+}
+
+.text-type-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  font-weight: 100;
+  animation: blink 0.7s step-end infinite;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
