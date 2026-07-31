@@ -26,6 +26,17 @@ function VerifyEmail() {
   useEffect(() => {
     if (hasVerified.current) return;
 
+    // Appwrite verification tokens are single-use. On Android, the page can be
+    // re-loaded (e.g. Gmail Custom Tab -> full-browser handoff, tab restore),
+    // which re-submits an already-consumed token and fails with
+    // "Invalid token" even though the email was verified on the first load.
+    // Skip the API call when we already confirmed verification for this user.
+    const verifiedKey = `email_verified_${userId}`;
+    if (userId && localStorage.getItem(verifiedKey)) {
+      setStatus(STATUS.ALREADY_VERIFIED);
+      return;
+    }
+
     const verifyEmail = async () => {
       // If no userId/secret in URL, show error
       if (!userId || !secret) {
@@ -47,6 +58,7 @@ function VerifyEmail() {
         const result = await authService.updateVerification(userId, secret);
         console.log("Verification success - result:", result);
         console.groupEnd();
+        if (userId) localStorage.setItem(verifiedKey, "true");
         setStatus(STATUS.SUCCESS);
       } catch (error) {
         console.log("Verification error object:", error);
@@ -69,6 +81,7 @@ function VerifyEmail() {
           msgLower.includes("user is already verified")
         ) {
           console.log("Matched: already verified");
+          if (userId) localStorage.setItem(verifiedKey, "true");
           setStatus(STATUS.ALREADY_VERIFIED);
         }
         // Handle expired/invalid link
