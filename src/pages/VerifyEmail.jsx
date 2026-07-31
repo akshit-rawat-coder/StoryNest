@@ -26,17 +26,6 @@ function VerifyEmail() {
   useEffect(() => {
     if (hasVerified.current) return;
 
-    // Appwrite verification tokens are single-use. On Android, the page can be
-    // re-loaded (e.g. Gmail Custom Tab -> full-browser handoff, tab restore),
-    // which re-submits an already-consumed token and fails with
-    // "Invalid token" even though the email was verified on the first load.
-    // Skip the API call when we already confirmed verification for this user.
-    const verifiedKey = `email_verified_${userId}`;
-    if (userId && localStorage.getItem(verifiedKey)) {
-      setStatus(STATUS.ALREADY_VERIFIED);
-      return;
-    }
-
     const verifyEmail = async () => {
       // If no userId/secret in URL, show error
       if (!userId || !secret) {
@@ -58,7 +47,6 @@ function VerifyEmail() {
         const result = await authService.updateVerification(userId, secret);
         console.log("Verification success - result:", result);
         console.groupEnd();
-        if (userId) localStorage.setItem(verifiedKey, "true");
         setStatus(STATUS.SUCCESS);
       } catch (error) {
         console.log("Verification error object:", error);
@@ -74,6 +62,12 @@ function VerifyEmail() {
         const msgLower = msg.toLowerCase();
 
         console.log("Normalized error message for matching:", msgLower);
+        console.log("window.location.href:", window.location.href);
+        console.log("window.location.search:", window.location.search);
+        console.log("userId length:", userId?.length);
+        console.log("secret length:", secret?.length);
+        console.log("userId bytes:", [...(userId || "")].map(c => c.charCodeAt(0).toString(16)));
+        console.log("secret bytes:", [...(secret || "")].map(c => c.charCodeAt(0).toString(16)));
 
         // Handle "already verified" error
         if (
@@ -81,7 +75,6 @@ function VerifyEmail() {
           msgLower.includes("user is already verified")
         ) {
           console.log("Matched: already verified");
-          if (userId) localStorage.setItem(verifiedKey, "true");
           setStatus(STATUS.ALREADY_VERIFIED);
         }
         // Handle expired/invalid link
@@ -234,6 +227,16 @@ function VerifyEmail() {
           <p className="mb-6 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
             {errorMessage || "This verification link is invalid or has expired."}
           </p>
+
+          {/* TEMPORARY DIAGNOSTICS — remove after testing */}
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-left text-xs text-amber-900 dark:border-amber-600 dark:bg-amber-900/30 dark:text-amber-200">
+            <p className="mb-1 font-bold">🔍 Diagnostic Info (screenshot this):</p>
+            <p><b>userId:</b> <span className="break-all font-mono">{userId ?? "NULL"}</span></p>
+            <p><b>userId length:</b> {userId?.length ?? "N/A"}</p>
+            <p><b>secret:</b> <span className="break-all font-mono">{secret ?? "NULL"}</span></p>
+            <p><b>secret length:</b> {secret?.length ?? "N/A"}</p>
+            <p><b>Full URL:</b> <span className="break-all font-mono">{typeof window !== 'undefined' ? window.location.href : 'N/A'}</span></p>
+          </div>
 
           <Button
             type="button"
