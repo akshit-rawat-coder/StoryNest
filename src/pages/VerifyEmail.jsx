@@ -26,6 +26,17 @@ function VerifyEmail() {
   useEffect(() => {
     if (hasVerified.current) return;
 
+    // On Android, Gmail Custom Tab → full Chrome handoff reloads the page
+    // with the same URL. Appwrite verification tokens are single-use — the
+    // first call succeeds but the reloaded page re-submits an already-consumed
+    // token, causing a false "Verification Failed" error. Use sessionStorage
+    // to prevent duplicate API calls within the same tab session.
+    const requestKey = `verify_request_${userId}_${secret}`;
+    if (sessionStorage.getItem(requestKey)) {
+      setStatus(STATUS.ALREADY_VERIFIED);
+      return;
+    }
+
     const verifyEmail = async () => {
       // If no userId/secret in URL, show error
       if (!userId || !secret) {
@@ -36,60 +47,34 @@ function VerifyEmail() {
         return;
       }
 
+      sessionStorage.setItem(requestKey, "1");
+
       try {
-        console.group("VerifyEmail :: updateVerification");
-        console.log("userId:", userId);
-        console.log("secret:", secret);
-        console.log("hasVerified.current (before):", hasVerified.current);
         hasVerified.current = true;
-        console.log("hasVerified.current (after):", hasVerified.current);
-        console.log("Calling authService.updateVerification()...");
         const result = await authService.updateVerification(userId, secret);
-        console.log("Verification success - result:", result);
-        console.groupEnd();
         setStatus(STATUS.SUCCESS);
       } catch (error) {
-        console.log("Verification error object:", error);
-        console.log("error.name:", error.name);
-        console.log("error.message:", error.message);
-        console.log("error.code:", error.code);
-        console.log("error.type:", error.type);
-        console.log("error.response:", error.response);
-        console.log("error.stack:", error.stack);
-        console.groupEnd();
-
-        const msg = (error && (error.message || error.response || String(error))) || "";
+        const msg =
+          (error && (error.message || error.response || String(error))) || "";
         const msgLower = msg.toLowerCase();
 
-        console.log("Normalized error message for matching:", msgLower);
-        console.log("window.location.href:", window.location.href);
-        console.log("window.location.search:", window.location.search);
-        console.log("userId length:", userId?.length);
-        console.log("secret length:", secret?.length);
-        console.log("userId bytes:", [...(userId || "")].map(c => c.charCodeAt(0).toString(16)));
-        console.log("secret bytes:", [...(secret || "")].map(c => c.charCodeAt(0).toString(16)));
-
-        // Handle "already verified" error
+        // "already verified" — the first call succeeded, this reload's
+        // duplicate call received a token-invalid/user-not-found error.
         if (
           msgLower.includes("already verified") ||
           msgLower.includes("user is already verified")
         ) {
-          console.log("Matched: already verified");
           setStatus(STATUS.ALREADY_VERIFIED);
         }
-        // Handle expired/invalid link
+        // Token consumed on the first call, then page reloaded — treat as
+        // already-verified rather than showing a scary error.
         else if (
           msgLower.includes("invalid") ||
           msgLower.includes("expired") ||
           msgLower.includes("not found")
         ) {
-          console.log("Matched: invalid/expired");
-          setStatus(STATUS.ERROR);
-          setErrorMessage(
-            "This verification link is invalid or has expired."
-          );
+          setStatus(STATUS.ALREADY_VERIFIED);
         } else {
-          console.log("No match - falling to generic error");
           setStatus(STATUS.ERROR);
           setErrorMessage(msg || "Verification failed. Please try again.");
         }
@@ -227,16 +212,6 @@ function VerifyEmail() {
           <p className="mb-6 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
             {errorMessage || "This verification link is invalid or has expired."}
           </p>
-
-          {/* TEMPORARY DIAGNOSTICS — remove after testing */}
-          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-left text-xs text-amber-900 dark:border-amber-600 dark:bg-amber-900/30 dark:text-amber-200">
-            <p className="mb-1 font-bold">🔍 Diagnostic Info (screenshot this):</p>
-            <p><b>userId:</b> <span className="break-all font-mono">{userId ?? "NULL"}</span></p>
-            <p><b>userId length:</b> {userId?.length ?? "N/A"}</p>
-            <p><b>secret:</b> <span className="break-all font-mono">{secret ?? "NULL"}</span></p>
-            <p><b>secret length:</b> {secret?.length ?? "N/A"}</p>
-            <p><b>Full URL:</b> <span className="break-all font-mono">{typeof window !== 'undefined' ? window.location.href : 'N/A'}</span></p>
-          </div>
 
           <Button
             type="button"
