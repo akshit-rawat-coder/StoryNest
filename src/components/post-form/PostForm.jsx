@@ -197,7 +197,7 @@ export default function PostForm({ post }) {
                             accept="image/png, image/jpg, image/jpeg, image/gif"
                             {...register("image")}
                         />
-                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Drag & drop visual area (upload logic unchanged).</p>
+                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Drag & drop visual area.</p>
                     </div>
 
                     {(post?.featuredImage || watch("image")?.[0]) && (
