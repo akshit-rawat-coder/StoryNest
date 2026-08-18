@@ -1,23 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
 
-/**
- * usePollingPosts — A reusable hook for polling posts at a configurable interval.
- *
- * Features:
- * - Immediately fetches on mount (when enabled).
- * - Polls every `interval` ms using setInterval.
- * - Prevents overlapping requests (skips tick if previous fetch is still in flight).
- * - Pauses polling when the browser tab is hidden (Page Visibility API).
- * - Resumes polling when the tab becomes visible (immediately fetches on resume).
- * - Pauses polling when the user is offline (navigator.onLine === false).
- * - Resumes polling when the connection is restored.
- * - Cleans up interval and all event listeners on unmount.
- * - Safe for React StrictMode (no duplicate intervals).
- *
- * @param {Function} fetchFn  — Async function to call on each poll tick.
- * @param {number}   [interval=10000]  — Polling interval in milliseconds.
- * @param {boolean}  [enabled=true]    — Whether polling is active.
- */
 export default function usePollingPosts(fetchFn, interval = 10000, enabled = true) {
   const intervalRef = useRef(null);
   const isFetchingRef = useRef(false);
@@ -80,7 +62,6 @@ export default function usePollingPosts(fetchFn, interval = 10000, enabled = tru
         isPausedRef.current = true;
       } else {
         isPausedRef.current = false;
-        // Immediately fetch when tab becomes visible again
         tick();
       }
     };
@@ -98,7 +79,6 @@ export default function usePollingPosts(fetchFn, interval = 10000, enabled = tru
 
     const handleOnline = () => {
       isPausedRef.current = false;
-      // Immediately fetch when connection is restored
       tick();
     };
 

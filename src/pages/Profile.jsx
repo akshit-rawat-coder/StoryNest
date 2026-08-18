@@ -97,7 +97,6 @@ function Profile() {
   const activePosts = useMemo(() => posts.filter((post) => post.status === "active"), [posts]);
   const drafts = useMemo(() => posts.filter((post) => post.status === "inactive"), [posts]);
 
-  // Fetch aggregated likes and views for all active posts
   useEffect(() => {
     if (activePosts.length === 0) {
       setTotalLikes(0);

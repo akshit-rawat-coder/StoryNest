@@ -186,7 +186,6 @@ function VerifyEmail() {
   }
 
   // Error State - Invalid or Expired Link
-  // Navigates users to login, where they can resend verification after authenticating
   return (
     <div className="w-full">
       <div className="mx-auto flex min-h-[calc(100vh-8rem)] w-full max-w-lg items-center justify-center p-6 sm:p-10 lg:p-12">

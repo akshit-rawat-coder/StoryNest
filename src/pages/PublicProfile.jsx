@@ -64,7 +64,6 @@ function PublicProfile() {
         }
         setProfile(nextProfile);
 
-        // Fetch this user's posts
         const postsResponse = await appwriteService.getPosts([
           Query.equal("userId", nextProfile.userId),
         ]);
@@ -91,7 +90,6 @@ function PublicProfile() {
     [posts]
   );
 
-  // Fetch aggregated likes and views
   useEffect(() => {
     if (activePosts.length === 0) {
       setTotalLikes(0);
