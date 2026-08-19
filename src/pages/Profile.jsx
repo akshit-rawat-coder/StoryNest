@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ThreeDot } from "react-loading-indicators";
 import { Query } from "appwrite";
 import { Link, useSearchParams } from "react-router-dom";
@@ -6,23 +6,32 @@ import { useSelector } from "react-redux";
 import appwriteService from "../appwrite/config";
 import profileService from "../appwrite/profile";
 import socialService from "../appwrite/social";
-import { Container, PostCard } from "../components";
+import { Container, PostCard, Loader } from "../components";
 import ProfileAvatar from "../components/profile/ProfileAvatar";
 import ProfileForm from "../components/profile/ProfileForm";
 import ProfileSkeleton from "../components/profile/ProfileSkeleton";
 
 const TAB_OPTIONS = ["posts", "drafts", "bookmarks"];
 
-const formatJoinDate = (date) => date
-  ? new Date(date).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
-  : "Recently joined";
+const formatJoinDate = (date) =>
+  date
+    ? new Date(date).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+    : "Recently joined";
 
 function Notice({ children, tone = "error" }) {
   const tones = {
     error: "border-red-200 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200",
-    success: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200",
+    success:
+      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200",
   };
-  return <div role={tone === "error" ? "alert" : "status"} className={`rounded-xl border px-4 py-3 text-sm ${tones[tone]}`}>{children}</div>;
+  return (
+    <div
+      role={tone === "error" ? "alert" : "status"}
+      className={`rounded-xl border px-4 py-3 text-sm ${tones[tone]}`}
+    >
+      {children}
+    </div>
+  );
 }
 
 function StatCard({ label, value, loading = false }) {
@@ -67,6 +76,9 @@ function Profile() {
   const [totalLikes, setTotalLikes] = useState(0);
   const [totalViews, setTotalViews] = useState(0);
   const [isStatsLoading, setIsStatsLoading] = useState(false);
+  const [bookmarkedPosts, setBookmarkedPosts] = useState([]);
+  const [isBookmarksLoading, setIsBookmarksLoading] = useState(false);
+  const [bookmarksError, setBookmarksError] = useState(false);
 
   useEffect(() => {
     if (!user?.$id) return;
@@ -128,6 +140,44 @@ function Profile() {
     fetchStats();
     return () => { mounted = false; };
   }, [activePosts]);
+
+  const loadBookmarks = useCallback(async () => {
+    if (!user?.$id) return;
+    setIsBookmarksLoading(true);
+    setBookmarksError(false);
+    try {
+      const bookmarks = await socialService.getUserBookmarks(user.$id);
+      const postIds = bookmarks.map((b) => b.postId).filter(Boolean);
+      const postsData = [];
+      for (const postId of postIds) {
+        try {
+          const post = await appwriteService.getPost(postId);
+          if (post && post.status === "active" && !postsData.some((p) => p.$id === post.$id)) {
+            postsData.push(post);
+          }
+        } catch (err) {
+          // Skip deleted/unavailable posts instead of breaking the bookmarks page.
+          console.warn("Skipping unavailable bookmarked post", postId, err);
+        }
+      }
+      setBookmarkedPosts(postsData);
+    } catch (err) {
+      console.error("Failed to load bookmarks", err);
+      setBookmarksError(true);
+    } finally {
+      setIsBookmarksLoading(false);
+    }
+  }, [user?.$id]);
+
+  useEffect(() => {
+    if (selectedTab !== "bookmarks" || !user?.$id) return;
+    const handleBookmarksUpdated = () => { loadBookmarks(); };
+    loadBookmarks();
+    window.addEventListener("storynest:bookmarks-updated", handleBookmarksUpdated);
+    return () => {
+      window.removeEventListener("storynest:bookmarks-updated", handleBookmarksUpdated);
+    };
+  }, [selectedTab, user?.$id, loadBookmarks]);
 
   const handleAvatarFile = (file) => {
     setError("");
@@ -265,7 +315,27 @@ function Profile() {
                 {TAB_OPTIONS.map((tab) => <button key={tab} type="button" role="tab" aria-selected={selectedTab === tab} onClick={() => setTab(tab)} className={`min-h-9 rounded-lg px-3 py-2 text-sm font-medium capitalize transition ${selectedTab === tab ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"}`}>{tab}</button>)}
               </div>
               {selectedTab === "bookmarks" ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900"><h2 className="text-xl font-semibold text-slate-900 dark:text-white">Bookmarks are coming soon</h2><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Save favorite stories in a future update.</p></div>
+                isBookmarksLoading ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <Loader text="Loading your bookmarks..." />
+                  </div>
+                ) : bookmarksError ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center dark:border-red-500/40 dark:bg-red-500/10">
+                    <h2 className="text-xl font-semibold text-red-700 dark:text-red-200">Unable to load your bookmarks</h2>
+                    <p className="mt-2 text-sm text-red-600 dark:text-red-300">Please try again.</p>
+                    <button type="button" onClick={loadBookmarks} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-red-700">Try again</button>
+                  </div>
+                ) : bookmarkedPosts.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="mx-auto h-12 w-12 text-slate-400 dark:text-slate-500">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+                    </svg>
+                    <h2 className="mt-4 text-xl font-semibold text-slate-900 dark:text-white">No bookmarks yet</h2>
+                    <p className="mx-auto mt-2 max-w-md text-sm text-slate-600 dark:text-slate-300">Save stories you want to read later and they'll appear here.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{bookmarkedPosts.map((post) => <PostCard key={post.$id} {...post} />)}</div>
+                )
               ) : (selectedTab === "posts" ? activePosts : drafts).length === 0 ? (
                 <EmptyPosts draft={selectedTab === "drafts"} />
               ) : (

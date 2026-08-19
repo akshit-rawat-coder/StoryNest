@@ -51,6 +51,11 @@ class SocialService {
     return response.rows?.[0] || null;
   }
 
+  async getUserBookmarks(userId) {
+    const response = await this.listRows(conf.appwriteBookmarksTableId, [Query.equal("userId", userId), Query.orderDesc("$createdAt")]);
+    return response.rows || [];
+  }
+
   async toggleBookmark(postId, userId) {
     const bookmark = await this.getUserBookmark(postId, userId);
     if (bookmark) {
