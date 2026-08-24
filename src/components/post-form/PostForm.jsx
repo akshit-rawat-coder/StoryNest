@@ -4,25 +4,26 @@ import { useForm } from "react-hook-form";
 import { Button, Input, RTE, Select } from "..";
 import appwriteService from "../../appwrite/config";
 import profileService from "../../appwrite/profile";
+import aiService from "../../appwrite/ai";
 import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 
 const CATEGORIES = [
-  "React",
-  "JavaScript",
-  "TypeScript",
-  "HTML",
-  "CSS",
-  "Tailwind CSS",
-  "Node.js",
-  "Express",
-  "MongoDB",
-  "PostgreSQL",
-  "Appwrite",
-  "AI",
-  "Career",
-  "DevOps",
-  "General"
+    "React",
+    "JavaScript",
+    "TypeScript",
+    "HTML",
+    "CSS",
+    "Tailwind CSS",
+    "Node.js",
+    "Express",
+    "MongoDB",
+    "PostgreSQL",
+    "Appwrite",
+    "AI",
+    "Career",
+    "DevOps",
+    "General"
 ];
 
 export default function PostForm({ post }) {
@@ -42,6 +43,12 @@ export default function PostForm({ post }) {
     const [profile, setProfile] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isUploadingImage, setIsUploadingImage] = useState(false);
+    const [isImproving, setIsImproving] = useState(false);
+    const [isSummarizing, setIsSummarizing] = useState(false);
+    const [isGeneratingTitles, setIsGeneratingTitles] = useState(false);
+    const [summary, setSummary] = useState("");
+    const [titles, setTitles] = useState([]);
+    const [aiError, setAiError] = useState("");
 
     useEffect(() => {
         if (userData?.$id) {
@@ -49,7 +56,7 @@ export default function PostForm({ post }) {
                 .then((prof) => {
                     if (prof) setProfile(prof);
                 })
-                .catch(() => {});
+                .catch(() => { });
         }
     }, [userData]);
 
@@ -63,7 +70,7 @@ export default function PostForm({ post }) {
 
         const postDetails = {
             title: data.title,
-              slug: data.slug,  
+            slug: data.slug,
             content: data.content,
             status: data.status,
             category: data.category,
@@ -149,6 +156,95 @@ export default function PostForm({ post }) {
         return () => subscription.unsubscribe();
     }, [watch, slugTransform, setValue]);
 
+    const getEditorTextOnly = () => {
+        const rawContent = getValues("content") || "";
+        // Strip HTML tags to check for raw text content
+        return rawContent.replace(/<[^>]*>/g, '').trim();
+    };
+
+    const validateContentNotEmpty = () => {
+        const textOnly = getEditorTextOnly();
+        if (!textOnly) {
+            setAiError("Please write some content first.");
+            return false;
+        }
+        setAiError("");
+        return true;
+    };
+
+    const getAiErrorMessage = (error, action) => {
+        if (error?.code === "INPUT_TOO_LARGE") {
+            return error.message;
+        }
+        // Show quota errors directly - they are actionable for the user
+        if (error?.message?.includes("AI quota exceeded")) {
+            return error.message;
+        }
+        const messages = {
+            improve: "Unable to improve the writing right now. Please try again.",
+            summarize: "Unable to generate a summary right now.",
+            title: "Unable to generate titles right now.",
+        };
+        return messages[action] || "An unexpected error occurred. Please try again.";
+    };
+
+    const handleImproveWriting = async () => {
+        if (!validateContentNotEmpty()) return;
+        setIsImproving(true);
+        setAiError("");
+        try {
+            const rawContent = getValues("content");
+            const improvedText = await aiService.improveText(rawContent);
+            if (improvedText) {
+                setValue("content", improvedText);
+            } else {
+                throw new Error("Empty response received from AI assistant.");
+            }
+        } catch (error) {
+            setAiError(getAiErrorMessage(error, "improve"));
+        } finally {
+            setIsImproving(false);
+        }
+    };
+
+    const handleGenerateSummary = async () => {
+        if (!validateContentNotEmpty()) return;
+        setIsSummarizing(true);
+        setAiError("");
+        try {
+            const rawContent = getValues("content");
+            const resSummary = await aiService.summarizeText(rawContent);
+            if (resSummary) {
+                setSummary(resSummary);
+            } else {
+                throw new Error("Empty summary received.");
+            }
+        } catch (error) {
+            setAiError(getAiErrorMessage(error, "summarize"));
+        } finally {
+            setIsSummarizing(false);
+        }
+    };
+
+    const handleGenerateTitles = async () => {
+        if (!validateContentNotEmpty()) return;
+        setIsGeneratingTitles(true);
+        setAiError("");
+        try {
+            const rawContent = getValues("content");
+            const resTitles = await aiService.generateTitles(rawContent);
+            if (resTitles && resTitles.length > 0) {
+                setTitles(resTitles);
+            } else {
+                throw new Error("No titles received.");
+            }
+        } catch (error) {
+            setAiError(getAiErrorMessage(error, "title"));
+        } finally {
+            setIsGeneratingTitles(false);
+        }
+    };
+
     const isEditMode = Boolean(post);
 
     return (
@@ -178,6 +274,129 @@ export default function PostForm({ post }) {
                         <RTE label="Content :" name="content" control={control} defaultValue={getValues("content")} />
                     </div>
                 </div>
+
+                {/* AI Writing Assistant Section */}
+                <div className="mt-6 border-t border-slate-200 pt-6 dark:border-slate-800/60">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-2">
+                            AI Writer:
+                        </span>
+
+                        <button
+                            type="button"
+                            onClick={handleImproveWriting}
+                            disabled={isImproving || isSummarizing || isGeneratingTitles}
+                            className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors ${isImproving
+                                ? "bg-indigo-500 cursor-not-allowed"
+                                : "bg-indigo-600 hover:bg-indigo-750 active:bg-indigo-800"
+                                } disabled:opacity-50`}
+                        >
+                            {isImproving ? "Improving..." : "Improve with AI"}
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={handleGenerateSummary}
+                            disabled={isImproving || isSummarizing || isGeneratingTitles}
+                            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                        >
+                            {isSummarizing ? "Summarizing..." : "Generate Summary"}
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={handleGenerateTitles}
+                            disabled={isImproving || isSummarizing || isGeneratingTitles}
+                            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                        >
+                            {isGeneratingTitles ? "Generating..." : "Generate Titles"}
+                        </button>
+                    </div>
+
+                    {/* Error Handling */}
+                    {aiError && (
+                        <div className="mt-4 rounded-xl border border-red-200 bg-red-50/50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-500/20 dark:bg-red-950/20 dark:text-red-300 flex justify-between items-center">
+                            <span>{aiError}</span>
+                            <button
+                                type="button"
+                                onClick={() => setAiError("")}
+                                className="text-red-500 hover:text-red-700 dark:text-red-450 dark:hover:text-red-300 font-bold ml-2 focus:outline-none"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Summary Display */}
+                    {summary && (
+                        <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/30 p-4 dark:border-indigo-500/10 dark:bg-indigo-950/10">
+                            <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-semibold text-indigo-900 dark:text-indigo-300">
+                                    AI Summary
+                                </h4>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(summary);
+                                            const originalText = document.getElementById("copy-btn").innerText;
+                                            document.getElementById("copy-btn").innerText = "Copied!";
+                                            setTimeout(() => {
+                                                document.getElementById("copy-btn").innerText = originalText;
+                                            }, 2000);
+                                        }}
+                                        id="copy-btn"
+                                        className="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-medium cursor-pointer"
+                                    >
+                                        Copy
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSummary("")}
+                                        className="text-xs text-slate-400 hover:text-slate-600 dark:text-slate-550 dark:hover:text-slate-350 cursor-pointer"
+                                    >
+                                        Dismiss
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{summary}</p>
+                        </div>
+                    )}
+
+                    {/* Titles Display */}
+                    {titles.length > 0 && (
+                        <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/30 p-4 dark:border-indigo-500/10 dark:bg-indigo-950/10">
+                            <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-sm font-semibold text-indigo-900 dark:text-indigo-300">
+                                    AI Titles (Click to apply)
+                                </h4>
+                                <button
+                                    type="button"
+                                    onClick={() => setTitles([])}
+                                    className="text-xs text-slate-400 hover:text-slate-600 dark:text-slate-550 dark:hover:text-slate-350 cursor-pointer"
+                                    id="dismiss-titles-btn"
+                                >
+                                    Dismiss
+                                </button>
+                            </div>
+                            <div className="space-y-2">
+                                {titles.map((titleText, idx) => (
+                                    <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() => {
+                                            setValue("title", titleText);
+                                            setValue("slug", slugTransform(titleText), { shouldValidate: true });
+                                        }}
+                                        className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-500 hover:bg-indigo-50/30 text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/50 dark:hover:bg-indigo-950/30 transition-all font-medium"
+                                    >
+                                        {titleText}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <aside className="lg:sticky lg:top-24 lg:self-start">
@@ -190,7 +409,7 @@ export default function PostForm({ post }) {
                     </div>
 
                     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/70">
-                    <Input
+                        <Input
                             label="Featured Image :"
                             type="file"
                             className="cursor-pointer file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-700"
@@ -215,12 +434,12 @@ export default function PostForm({ post }) {
                                     className="w-full rounded-lg object-cover"
                                 />
                             ) : watch("image")?.[0] ? (
-    <img
-        src={URL.createObjectURL(watch("image")[0])}
-        alt="Preview"
-        className="w-full h-64 object-cover rounded-lg"
-    />
-) : null}
+                                <img
+                                    src={URL.createObjectURL(watch("image")[0])}
+                                    alt="Preview"
+                                    className="w-full h-64 object-cover rounded-lg"
+                                />
+                            ) : null}
                         </div>
                     )}
 

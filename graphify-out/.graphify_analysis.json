@@ -1,0 +1,395 @@
+{
+  "communities": {
+    "0": [
+      "ref_react",
+      "src_app",
+      "src_appwrite_auth",
+      "src_components_authlayout",
+      "src_components_authlayout_protected",
+      "src_components_button",
+      "src_components_button_button",
+      "src_components_container_container",
+      "src_components_footer_footer",
+      "src_components_footer_footer_footer",
+      "src_components_header_header_header",
+      "src_components_header_logoutbtn",
+      "src_components_index",
+      "src_components_input",
+      "src_components_input_input",
+      "src_components_loader",
+      "src_components_loader_loader",
+      "src_components_login",
+      "src_components_login_login",
+      "src_components_logo",
+      "src_components_logo_logo",
+      "src_components_post_form_postform",
+      "src_components_post_form_postform_categories",
+      "src_components_post_form_postform_postform",
+      "src_components_profile_profileavatar",
+      "src_components_profile_profileavatar_initialfor",
+      "src_components_profile_profileavatar_profileavatar",
+      "src_components_rte",
+      "src_components_rte_rte",
+      "src_components_select",
+      "src_components_select_select",
+      "src_components_signup",
+      "src_components_signup_signup",
+      "src_context_usetheme_usetheme",
+      "src_pages_editpost",
+      "src_pages_login",
+      "src_pages_login_login",
+      "src_pages_verifyemail",
+      "src_pages_verifyemail_status",
+      "src_store_authslice",
+      "src_store_authslice_authslice",
+      "src_store_authslice_initialstate"
+    ],
+    "1": [
+      "src_appwrite_ai",
+      "src_appwrite_config",
+      "src_appwrite_profile",
+      "src_appwrite_social",
+      "src_components_container_container_container",
+      "src_components_header_header",
+      "src_components_postcard",
+      "src_components_postcard_postcard",
+      "src_components_social_comments",
+      "src_components_social_comments_comments",
+      "src_components_social_postsocialactions",
+      "src_components_social_postsocialactions_actionbutton",
+      "src_components_social_postsocialactions_postsocialactions",
+      "src_components_texttype_texttype",
+      "src_components_texttype_texttype_texttype",
+      "src_conf_conf",
+      "src_conf_conf_conf",
+      "src_hooks_usepollingposts",
+      "src_hooks_usepollingposts_usepollingposts",
+      "src_pages_allposts",
+      "src_pages_allposts_allposts",
+      "src_pages_allposts_categories",
+      "src_pages_home",
+      "src_pages_home_home",
+      "src_pages_post",
+      "src_pages_post_post",
+      "src_pages_publicprofile",
+      "src_pages_publicprofile_formatjoindate",
+      "src_pages_publicprofile_publicprofile",
+      "src_pages_publicprofile_statcard"
+    ],
+    "2": [
+      "appwrite",
+      "claude",
+      "code",
+      "gsap",
+      "html_react_parser",
+      "package_dependencies",
+      "package_dependencies_appwrite",
+      "package_dependencies_claude",
+      "package_dependencies_code",
+      "package_dependencies_gsap",
+      "package_dependencies_html_react_parser",
+      "package_dependencies_react",
+      "package_dependencies_react_dom",
+      "package_dependencies_react_hook_form",
+      "package_dependencies_react_loading_indicators",
+      "package_dependencies_react_photo_view",
+      "package_dependencies_react_redux",
+      "package_dependencies_react_router_dom",
+      "package_dependencies_reduxjs_toolkit",
+      "package_dependencies_tinymce_tinymce_react",
+      "react",
+      "react_dom",
+      "react_hook_form",
+      "react_loading_indicators",
+      "react_photo_view",
+      "react_redux",
+      "react_router_dom",
+      "reduxjs_toolkit",
+      "tinymce_tinymce_react"
+    ],
+    "3": [
+      "autoprefixer",
+      "oxlint",
+      "package",
+      "package_devdependencies",
+      "package_devdependencies_autoprefixer",
+      "package_devdependencies_oxlint",
+      "package_devdependencies_postcss",
+      "package_devdependencies_tailwindcss",
+      "package_devdependencies_types_react",
+      "package_devdependencies_types_react_dom",
+      "package_devdependencies_vite",
+      "package_devdependencies_vitejs_plugin_react",
+      "package_json_tailwindcss",
+      "package_name",
+      "package_private",
+      "package_scripts",
+      "package_scripts_build",
+      "package_scripts_dev",
+      "package_scripts_lint",
+      "package_scripts_preview",
+      "package_type",
+      "package_version",
+      "postcss",
+      "types_react",
+      "types_react_dom",
+      "vite",
+      "vitejs_plugin_react"
+    ],
+    "4": [
+      "src_appwrite_social_socialservice",
+      "src_appwrite_social_socialservice_constructor",
+      "src_appwrite_social_socialservice_createcomment",
+      "src_appwrite_social_socialservice_deletecomment",
+      "src_appwrite_social_socialservice_getcomments",
+      "src_appwrite_social_socialservice_getlikecount",
+      "src_appwrite_social_socialservice_gettotallikesforposts",
+      "src_appwrite_social_socialservice_gettotalviewsforposts",
+      "src_appwrite_social_socialservice_getuserbookmark",
+      "src_appwrite_social_socialservice_getuserbookmarks",
+      "src_appwrite_social_socialservice_getuserlike",
+      "src_appwrite_social_socialservice_getviewcount",
+      "src_appwrite_social_socialservice_listrows",
+      "src_appwrite_social_socialservice_recordview",
+      "src_appwrite_social_socialservice_togglebookmark",
+      "src_appwrite_social_socialservice_togglelike",
+      "src_appwrite_social_socialservice_updatecomment"
+    ],
+    "5": [
+      "src_context_theme_context",
+      "src_context_theme_context_themecontext",
+      "src_context_themecontext",
+      "src_context_themecontext_getsystemtheme",
+      "src_context_themecontext_themeprovider",
+      "src_context_usetheme",
+      "src_main",
+      "src_main_router",
+      "src_pages_addpost",
+      "src_pages_addpost_addpost",
+      "src_pages_editpost_editpost",
+      "src_pages_signup",
+      "src_pages_signup_signup",
+      "src_pages_verifyemail_verifyemail",
+      "src_store_store",
+      "src_store_store_store"
+    ],
+    "6": [
+      "src_components_profile_profileform",
+      "src_components_profile_profileform_fielderror",
+      "src_components_profile_profileform_isdomainurl",
+      "src_components_profile_profileform_isurl",
+      "src_components_profile_profileform_profileform",
+      "src_components_profile_profileskeleton",
+      "src_components_profile_profileskeleton_profileskeleton",
+      "src_pages_profile",
+      "src_pages_profile_emptyposts",
+      "src_pages_profile_formatjoindate",
+      "src_pages_profile_notice",
+      "src_pages_profile_profile",
+      "src_pages_profile_statcard",
+      "src_pages_profile_tab_options"
+    ],
+    "7": [
+      "src_app_app",
+      "src_appwrite_auth_authservice",
+      "src_appwrite_auth_authservice_constructor",
+      "src_appwrite_auth_authservice_createaccount",
+      "src_appwrite_auth_authservice_deletesession",
+      "src_appwrite_auth_authservice_getcurrentuser",
+      "src_appwrite_auth_authservice_login",
+      "src_appwrite_auth_authservice_logout",
+      "src_appwrite_auth_authservice_resendverification",
+      "src_appwrite_auth_authservice_sendverificationemail",
+      "src_appwrite_auth_authservice_updateverification",
+      "src_components_header_logoutbtn_logoutbtn"
+    ],
+    "8": [
+      "src_appwrite_profile_profileservice",
+      "src_appwrite_profile_profileservice_constructor",
+      "src_appwrite_profile_profileservice_createprofile",
+      "src_appwrite_profile_profileservice_deleteavatar",
+      "src_appwrite_profile_profileservice_getavatarurl",
+      "src_appwrite_profile_profileservice_getorcreateprofile",
+      "src_appwrite_profile_profileservice_getprofile",
+      "src_appwrite_profile_profileservice_getprofilebyusername",
+      "src_appwrite_profile_profileservice_isusernameavailable",
+      "src_appwrite_profile_profileservice_updateprofile",
+      "src_appwrite_profile_profileservice_uploadavatar"
+    ],
+    "9": [
+      "src_appwrite_config_services",
+      "src_appwrite_config_services_constructor",
+      "src_appwrite_config_services_createpost",
+      "src_appwrite_config_services_deletefile",
+      "src_appwrite_config_services_deletepost",
+      "src_appwrite_config_services_getfilepreview",
+      "src_appwrite_config_services_getpost",
+      "src_appwrite_config_services_getposts",
+      "src_appwrite_config_services_updatepost",
+      "src_appwrite_config_services_uploadfile"
+    ],
+    "10": [
+      "oxlintrc",
+      "oxlintrc_plugins",
+      "oxlintrc_rules",
+      "oxlintrc_rules_react_only_export_components",
+      "oxlintrc_rules_react_rules_of_hooks",
+      "oxlintrc_schema",
+      "ref_oxc",
+      "ref_warn"
+    ],
+    "11": [
+      "src_appwrite_ai_aiservice",
+      "src_appwrite_ai_aiservice_callaifunction",
+      "src_appwrite_ai_aiservice_constructor",
+      "src_appwrite_ai_aiservice_generatetitles",
+      "src_appwrite_ai_aiservice_improvetext",
+      "src_appwrite_ai_aiservice_summarizetext"
+    ],
+    "12": [
+      "vercel",
+      "vercel_rewrites"
+    ],
+    "13": [
+      "postcss_config"
+    ],
+    "14": [
+      "search_code"
+    ],
+    "15": [
+      "search_github"
+    ],
+    "16": [
+      "search_github_issue"
+    ],
+    "17": [
+      "tailwind_config"
+    ],
+    "18": [
+      "vite_config"
+    ]
+  },
+  "cohesion": {
+    "0": 0.11382113821138211,
+    "1": 0.135632183908046,
+    "2": 0.06896551724137931,
+    "3": 0.07407407407407407,
+    "4": 0.19117647058823528,
+    "5": 0.18333333333333332,
+    "6": 0.1978021978021978,
+    "7": 0.24242424242424243,
+    "8": 0.23636363636363636,
+    "9": 0.2,
+    "10": 0.25,
+    "11": 0.5333333333333333,
+    "12": 1.0,
+    "13": 1.0,
+    "14": 1.0,
+    "15": 1.0,
+    "16": 1.0,
+    "17": 1.0,
+    "18": 1.0
+  },
+  "gods": [
+    {
+      "id": "ref_react",
+      "label": "react",
+      "degree": 38
+    },
+    {
+      "id": "src_appwrite_social_socialservice",
+      "label": "SocialService",
+      "degree": 17
+    },
+    {
+      "id": "src_appwrite_profile_profileservice",
+      "label": "ProfileService",
+      "degree": 11
+    },
+    {
+      "id": "src_appwrite_auth_authservice",
+      "label": "AuthService",
+      "degree": 10
+    },
+    {
+      "id": "src_appwrite_config_services",
+      "label": "Services",
+      "degree": 10
+    },
+    {
+      "id": "src_components_container_container_container",
+      "label": "Container()",
+      "degree": 10
+    },
+    {
+      "id": "src_components_button_button",
+      "label": "Button()",
+      "degree": 10
+    },
+    {
+      "id": "src_components_loader_loader",
+      "label": "Loader()",
+      "degree": 8
+    },
+    {
+      "id": "src_components_postcard_postcard",
+      "label": "PostCard()",
+      "degree": 7
+    },
+    {
+      "id": "src_conf_conf_conf",
+      "label": "conf",
+      "degree": 7
+    }
+  ],
+  "surprises": [
+    {
+      "source": "Header()",
+      "target": "useTheme()",
+      "source_files": [
+        "src/components/Header/Header.jsx",
+        "src/context/useTheme.js"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "cross-file semantic connection"
+    },
+    {
+      "source": "Loader()",
+      "target": "useTheme()",
+      "source_files": [
+        "src/components/Loader.jsx",
+        "src/context/useTheme.js"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "cross-file semantic connection"
+    },
+    {
+      "source": "AllPosts()",
+      "target": "usePollingPosts()",
+      "source_files": [
+        "src/pages/AllPosts.jsx",
+        "src/hooks/usePollingPosts.js"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "cross-file semantic connection"
+    },
+    {
+      "source": "Home()",
+      "target": "usePollingPosts()",
+      "source_files": [
+        "src/pages/Home.jsx",
+        "src/hooks/usePollingPosts.js"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "cross-file semantic connection"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}
