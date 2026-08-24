@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 .env
 .claude/settings.json
+
+graphify-out/
