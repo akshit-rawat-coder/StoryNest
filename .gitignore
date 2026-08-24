@@ -26,3 +26,5 @@ dist-ssr
 .claude/settings.json
 
 graphify-out/
+
+.agents/
