@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import appwriteService from "../appwrite/config";
 import { Button, Container, Loader, PostCard } from "../components";
@@ -8,6 +8,7 @@ import { PhotoProvider, PhotoView } from "react-photo-view";
 import "react-photo-view/dist/react-photo-view.css";
 import PostSocialActions from "../components/social/PostSocialActions";
 import Comments from "../components/social/Comments";
+import { calculateReadingTime } from "../utils/readingTime";
 
 export default function Post() {
     const [post, setPost] = useState(null);
@@ -89,9 +90,17 @@ export default function Post() {
         ? new Date(post.$createdAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
         : "Recently published";
     const authorLabel = post?.authorUsername || "StoryNest Author";
-    const readingTime = post?.content
-        ? Math.max(1, Math.ceil(post.content.replace(/<[^>]*>/g, " ").trim().split(/\s+/).filter(Boolean).length / 200))
-        : 1;
+    const readingTime = calculateReadingTime(post?.content);
+
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [isLongContent, setIsLongContent] = useState(false);
+    const contentRef = useRef(null);
+
+    useLayoutEffect(() => {
+      if (contentRef.current) {
+        setIsLongContent(contentRef.current.scrollHeight > 500);
+      }
+    }, [post?.content]);
 
     const tagsList = post?.tags
         ? (typeof post.tags === "string" ? post.tags.split(",").map(t => t.trim()).filter(Boolean) : (Array.isArray(post.tags) ? post.tags : []))
@@ -171,7 +180,32 @@ export default function Post() {
                     <aside><div className="sticky top-24 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"><PostSocialActions postId={post.$id} user={userData} /></div></aside>
                     <section className="min-w-0">
                         <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-8">
-                            <div className="mx-auto max-w-[70ch] text-base leading-8 text-slate-700 dark:text-slate-300"><div className="browser-css [&_h1]:mb-4 [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-2xl [&_h2]:font-semibold [&_p]:mb-5 [&_ul]:mb-5 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:mb-5 [&_ol]:list-decimal [&_ol]:pl-6 [&_a]:text-indigo-600 [&_a]:underline dark:[&_a]:text-indigo-300">{parse(post.content)}</div></div>
+                            <div className="mx-auto max-w-[70ch] text-base leading-8 text-slate-700 dark:text-slate-300">
+                                <div
+                                    ref={contentRef}
+                                    className={`${!isExpanded && isLongContent ? "max-h-[500px] overflow-hidden relative" : ""}`}
+                                >
+                                    {typeof post.content === "string" && post.content.trim() ? (
+                                        <div className="browser-css [&_h1]:mb-4 [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-2xl [&_h2]:font-semibold [&_p]:mb-5 [&_ul]:mb-5 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:mb-5 [&_ol]:list-decimal [&_ol]:pl-6 [&_a]:text-indigo-600 [&_a]:underline dark:[&_a]:text-indigo-300">{parse(post.content)}</div>
+                                    ) : (
+                                        <p className="text-slate-500 italic">No content yet.</p>
+                                    )}
+                                    {!isExpanded && isLongContent && (
+                                        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white via-white/80 to-transparent dark:from-slate-900 dark:via-slate-900/80 dark:to-transparent pointer-events-none" />
+                                    )}
+                                </div>
+                            </div>
+                            {isLongContent && (
+                                <div className="mx-auto max-w-[70ch] mt-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsExpanded((prev) => !prev)}
+                                        className="text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+                                    >
+                                        {isExpanded ? "Show less" : "Read more →"}
+                                    </button>
+                                </div>
+                            )}
                         </article>
                         {relatedPosts.length > 0 && (
                             <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-8">

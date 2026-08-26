@@ -4,6 +4,7 @@ import socialService from "../appwrite/social"
 import { useSelector } from 'react-redux'
 import { Link, useNavigate } from 'react-router-dom'
 import { PhotoProvider, PhotoView } from "react-photo-view";
+import { calculateReadingTime } from "../utils/readingTime";
 
 function PostCard({ $id, title, featuredImage, status, category, tags, content }) {
   const navigate = useNavigate();
@@ -48,9 +49,25 @@ function PostCard({ $id, title, featuredImage, status, category, tags, content }
     ? tags.split(',').map(t => t.trim()).filter(Boolean)
     : (Array.isArray(tags) ? tags : []);
 
-  const readingTime = content
-    ? Math.max(1, Math.ceil(content.replace(/<[^>]*>/g, " ").trim().split(/\s+/).filter(Boolean).length / 200))
-    : 1;
+  const readingTime = calculateReadingTime(content);
+
+  function getPlainText(html) {
+    if (!html || typeof html !== "string") return "";
+    return html
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&[a-z]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const MAX_PREVIEW_LENGTH = 150;
+  const plainText = getPlainText(content);
+  const isLongContent = plainText.length > MAX_PREVIEW_LENGTH;
+  const truncatedText = plainText.slice(0, MAX_PREVIEW_LENGTH);
+  const lastSpaceIndex = truncatedText.lastIndexOf(" ");
+  const previewText =
+    lastSpaceIndex > 0 ? truncatedText.slice(0, lastSpaceIndex) + "..." : truncatedText + "...";
 
   return (
     <Link to={`/post/${$id}`} className="block h-full">
@@ -133,6 +150,22 @@ function PostCard({ $id, title, featuredImage, status, category, tags, content }
                   #{tag}
                 </button>
               ))}
+            </div>
+          )}
+
+          {plainText && (
+            <div className="relative mt-3">
+              <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3">
+                {isLongContent ? previewText : plainText}
+              </p>
+              {isLongContent && (
+                <>
+                  <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white to-transparent dark:from-slate-900 pointer-events-none" />
+                  <span className="relative mt-1 inline-block text-xs font-medium text-indigo-600 dark:text-indigo-400">
+                    Read more →
+                  </span>
+                </>
+              )}
             </div>
           )}
 
