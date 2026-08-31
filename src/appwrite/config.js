@@ -1,5 +1,5 @@
 import conf from "../conf/conf";
-import { Client, ID, TablesDB, Storage } from "appwrite";
+import { Client, ID, Query, TablesDB, Storage } from "appwrite";
 
 export class Services {
   client = new Client();
@@ -97,12 +97,12 @@ export class Services {
   }
 
   // Get All Posts
-async getPosts(queries = []) {
+  async getPosts(queries = []) {
     try {
       return await this.tablesDB.listRows({
         databaseId: conf.appwriteDatabaseId,
         tableId: conf.appwriteCollectionId,
-        queries,
+        queries: [Query.orderDesc("$createdAt"), ...queries],
       });
     } catch (error) {
       console.log("Appwrite Service :: getPosts :: error", error);
