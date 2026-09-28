@@ -13,7 +13,8 @@ function PostSocialActions({ postId, user }) {
   const [likeCount, setLikeCount] = useState(0);
   const [bookmarked, setBookmarked] = useState(false);
   const [viewCount, setViewCount] = useState(0);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isLikePending, setIsLikePending] = useState(false);
+  const [isSavePending, setIsSavePending] = useState(false);
   const [notice, setNotice] = useState("");
   const likeRequestVersion = useRef(0);
 
@@ -56,20 +57,29 @@ function PostSocialActions({ postId, user }) {
       return;
     }
     setNotice("");
-    setIsSaving(true);
-    try {
-      if (type === "like") {
+    if (type === "like") {
+      if (isLikePending) return;
+      setIsLikePending(true);
+      try {
         likeRequestVersion.current += 1;
         const nextLiked = await socialService.toggleLike(postId, user.$id);
         setLiked(nextLiked);
         setLikeCount((count) => Math.max(0, count + (nextLiked ? 1 : -1)));
-      } else {
-        setBookmarked(await socialService.toggleBookmark(postId, user.$id));
+      } catch {
+        setNotice("We could not save that change. Please try again.");
+      } finally {
+        setIsLikePending(false);
       }
-    } catch {
-      setNotice("We could not save that change. Please try again.");
-    } finally {
-      setIsSaving(false);
+    } else {
+      if (isSavePending) return;
+      setIsSavePending(true);
+      try {
+        setBookmarked(await socialService.toggleBookmark(postId, user.$id));
+      } catch {
+        setNotice("We could not save that change. Please try again.");
+      } finally {
+        setIsSavePending(false);
+      }
     }
   };
 
@@ -97,8 +107,8 @@ function PostSocialActions({ postId, user }) {
     <div className="space-y-2">
       <p className="text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Engage</p>
       <div className="flex flex-wrap gap-2 lg:flex-col">
-        <ActionButton active={liked} onClick={() => toggle("like")} disabled={isSaving} loading={isSaving} label={liked ? "Unlike this post" : "Like this post"}>{liked ? "♥ Liked" : "♡ Like"} ({likeCount})</ActionButton>
-        <ActionButton active={bookmarked} onClick={() => toggle("bookmark")} disabled={isSaving} loading={isSaving} label={bookmarked ? "Remove bookmark" : "Bookmark this post"}>{bookmarked ? "★ Saved" : "☆ Save"}</ActionButton>
+        <ActionButton active={liked} onClick={() => toggle("like")} disabled={!user?.$id} loading={isLikePending} label={liked ? "Unlike this post" : "Like this post"}>{liked ? "♥ Liked" : "♡ Like"} ({likeCount})</ActionButton>
+        <ActionButton active={bookmarked} onClick={() => toggle("bookmark")} disabled={!user?.$id} loading={isSavePending} label={bookmarked ? "Remove bookmark" : "Bookmark this post"}>{bookmarked ? "★ Saved" : "☆ Save"}</ActionButton>
       </div>
       <p className="pt-1 text-center text-xs text-slate-500 dark:text-slate-400">{viewCount} {viewCount === 1 ? "view" : "views"}</p>
       <div className="border-t border-slate-200 pt-2 dark:border-slate-700">
