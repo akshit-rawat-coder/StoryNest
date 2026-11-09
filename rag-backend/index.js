@@ -1,3 +1,5 @@
+import { createRequestHandler } from "./server.js";
+
 export { getEnv, envSchema } from "./config/env.js";
 export {
   BaseEmbeddingProvider,
@@ -13,4 +15,34 @@ export { ArticleProcessor } from "./pipeline/article.processor.js";
 export { OpenRouterChatService } from "./services/chat.service.js";
 export { RagQueryService, QuestionInputSchema } from "./services/rag.service.js";
 export { SyncService } from "./services/sync.service.js";
-export { createServer } from "./server.js";
+export { createServer, createRequestHandler } from "./server.js";
+
+// Cached serverless handler across warm invocations
+let cachedHandler = null;
+
+/**
+ * Default export handler for Vercel Serverless Function runtime.
+ * Handles:
+ * - GET /api/health (and /)
+ * - POST /api/ask
+ * - POST /api/webhooks/appwrite
+ * - POST /api/articles/sync-single
+ */
+export default async function handler(req, res) {
+  try {
+    if (!cachedHandler) {
+      cachedHandler = createRequestHandler();
+    }
+    return await cachedHandler(req, res);
+  } catch (err) {
+    console.error("Vercel Serverless Function Error:", err);
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        error: "Internal Server Error",
+        message: err.message || "Failed to process request",
+      })
+    );
+  }
+}

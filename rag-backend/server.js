@@ -18,7 +18,9 @@ class RateLimiter {
     this.requests = new Map();
 
     // Periodic cleanup of stale entries every 5 minutes
-    setInterval(() => this.cleanup(), 300000).unref();
+    if (typeof setInterval !== "undefined") {
+      setInterval(() => this.cleanup(), 300000).unref?.();
+    }
   }
 
   isAllowed(ip) {
@@ -50,14 +52,14 @@ class RateLimiter {
 }
 
 /**
- * Creates and configures the HTTP server for the Ask StoryNest RAG API.
+ * Creates the request handler function compatible with both native http.Server and Vercel Serverless Functions.
  * @param {Object} [options]
  * @param {Object} [options.env]
  * @param {RagQueryService} [options.ragQueryService]
  * @param {SyncService} [options.syncService]
- * @returns {http.Server}
+ * @returns {(req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>}
  */
-export function createServer(options = {}) {
+export function createRequestHandler(options = {}) {
   const env = options.env || getEnv();
 
   let ragService = options.ragQueryService;
@@ -110,7 +112,7 @@ export function createServer(options = {}) {
 
   const MAX_BODY_BYTES = 500 * 1024; // 500 KB limit for webhooks/queries
 
-  const server = http.createServer(async (req, res) => {
+  return async function requestHandler(req, res) {
     // 1. CORS Configuration
     const requestOrigin = req.headers.origin || "";
     const allowedOrigin = env.CORS_ORIGIN === "*" ? "*" : env.CORS_ORIGIN;
@@ -122,7 +124,10 @@ export function createServer(options = {}) {
     }
 
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Webhook-Secret, X-Appwrite-Webhook-Signature, X-Appwrite-Webhook-Event");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Webhook-Secret, X-Appwrite-Webhook-Signature, X-Appwrite-Webhook-Event"
+    );
     res.setHeader("Access-Control-Max-Age", "86400");
 
     // Handle preflight OPTIONS request
@@ -134,32 +139,50 @@ export function createServer(options = {}) {
 
     const host = req.headers.host || "127.0.0.1";
     const url = new URL(req.url, `http://${host}`);
-    const pathname = url.pathname;
+    const rawPath = url.pathname;
+
+    // Fast 204 for browser favicon probes
+    if (rawPath === "/favicon.ico") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Normalize path to support root / (health), /api/* and /* paths
+    const pathname =
+      rawPath === "/"
+        ? "/api/health"
+        : rawPath.startsWith("/api")
+        ? rawPath
+        : `/api${rawPath}`;
     const querySecret = url.searchParams.get("secret") || "";
 
     const clientIp =
       req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
-      req.socket.remoteAddress ||
+      req.socket?.remoteAddress ||
       "127.0.0.1";
 
-    // 2. Health Endpoint
-    if (req.method === "GET" && pathname === "/api/health") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "ok",
-          service: "ask-storynest-rag",
-          model: env.OPENROUTER_CHAT_MODEL,
-          collection: env.QDRANT_COLLECTION_NAME,
-          timestamp: new Date().toISOString(),
-        })
-      );
-      return;
-    }
-
-    // Helper to read JSON body
+    // Helper to read JSON body (supports pre-parsed Vercel req.body AND stream)
     const readJsonBody = () =>
       new Promise((resolve, reject) => {
+        // Handle pre-parsed body from Vercel / middleware
+        if (req.body !== undefined && req.body !== null) {
+          if (typeof req.body === "object") {
+            return resolve(req.body);
+          }
+          if (typeof req.body === "string") {
+            if (!req.body.trim()) return resolve({});
+            try {
+              return resolve(JSON.parse(req.body));
+            } catch {
+              const err = new Error("Invalid JSON body");
+              err.status = 400;
+              return reject(err);
+            }
+          }
+        }
+
+        // Stream reading for native Node http server
         const contentLength = parseInt(req.headers["content-length"] || "0", 10);
         if (contentLength > MAX_BODY_BYTES) {
           const err = new Error("Payload Too Large");
@@ -197,6 +220,21 @@ export function createServer(options = {}) {
 
         req.on("error", (err) => reject(err));
       });
+
+    // 2. Health Endpoint
+    if (req.method === "GET" && pathname === "/api/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "ok",
+          service: "ask-storynest-rag",
+          model: env.OPENROUTER_CHAT_MODEL,
+          collection: env.QDRANT_COLLECTION_NAME,
+          timestamp: new Date().toISOString(),
+        })
+      );
+      return;
+    }
 
     // 3. POST /api/ask Endpoint
     if (req.method === "POST" && pathname === "/api/ask") {
@@ -302,9 +340,17 @@ export function createServer(options = {}) {
     // 404 Not Found
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Endpoint not found" }));
-  });
+  };
+}
 
-  return server;
+/**
+ * Creates and configures the HTTP server for local standalone execution and testing.
+ * @param {Object} [options]
+ * @returns {http.Server}
+ */
+export function createServer(options = {}) {
+  const handler = createRequestHandler(options);
+  return http.createServer(handler);
 }
 
 // Start standalone server if executed directly
