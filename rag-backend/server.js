@@ -1,0 +1,336 @@
+import http from "node:http";
+import { getEnv } from "./config/env.js";
+import { createEmbeddingProvider } from "./providers/index.js";
+import { createQdrantClient } from "./vector/qdrant.client.js";
+import { VectorStore } from "./vector/vector.store.js";
+import { OpenRouterChatService } from "./services/chat.service.js";
+import { RagQueryService } from "./services/rag.service.js";
+import { ArticleProcessor } from "./pipeline/article.processor.js";
+import { SyncService } from "./services/sync.service.js";
+
+/**
+ * In-memory sliding-window rate limiter per client IP.
+ */
+class RateLimiter {
+  constructor({ maxRequests = 30, windowMs = 60000 } = {}) {
+    this.maxRequests = maxRequests;
+    this.windowMs = windowMs;
+    this.requests = new Map();
+
+    // Periodic cleanup of stale entries every 5 minutes
+    setInterval(() => this.cleanup(), 300000).unref();
+  }
+
+  isAllowed(ip) {
+    const now = Date.now();
+    const timestamps = this.requests.get(ip) || [];
+    const recent = timestamps.filter((t) => now - t < this.windowMs);
+
+    if (recent.length >= this.maxRequests) {
+      this.requests.set(ip, recent);
+      return false;
+    }
+
+    recent.push(now);
+    this.requests.set(ip, recent);
+    return true;
+  }
+
+  cleanup() {
+    const now = Date.now();
+    for (const [ip, timestamps] of this.requests.entries()) {
+      const active = timestamps.filter((t) => now - t < this.windowMs);
+      if (active.length === 0) {
+        this.requests.delete(ip);
+      } else {
+        this.requests.set(ip, active);
+      }
+    }
+  }
+}
+
+/**
+ * Creates and configures the HTTP server for the Ask StoryNest RAG API.
+ * @param {Object} [options]
+ * @param {Object} [options.env]
+ * @param {RagQueryService} [options.ragQueryService]
+ * @param {SyncService} [options.syncService]
+ * @returns {http.Server}
+ */
+export function createServer(options = {}) {
+  const env = options.env || getEnv();
+
+  let ragService = options.ragQueryService;
+  let syncService = options.syncService;
+
+  if (!ragService || !syncService) {
+    const embeddingProvider = createEmbeddingProvider(env);
+    const qdrantClient = createQdrantClient({
+      url: env.QDRANT_URL,
+      apiKey: env.QDRANT_API_KEY,
+    });
+    const vectorStore = new VectorStore({
+      client: qdrantClient,
+      collectionName: env.QDRANT_COLLECTION_NAME,
+    });
+
+    if (!ragService) {
+      const chatService = new OpenRouterChatService({
+        apiKey: env.OPENROUTER_API_KEY,
+        model: env.OPENROUTER_CHAT_MODEL,
+        maxTokens: env.OPENROUTER_CHAT_MAX_TOKENS,
+      });
+
+      ragService = new RagQueryService({
+        embeddingProvider,
+        vectorStore,
+        chatService,
+        similarityThreshold: env.SIMILARITY_THRESHOLD,
+        topK: env.TOP_K_CHUNKS,
+      });
+    }
+
+    if (!syncService) {
+      const articleProcessor = new ArticleProcessor({
+        embeddingProvider,
+        vectorStore,
+      });
+
+      syncService = new SyncService({
+        processor: articleProcessor,
+        env,
+      });
+    }
+  }
+
+  const rateLimiter = new RateLimiter({
+    maxRequests: env.RATE_LIMIT_MAX_REQUESTS,
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+  });
+
+  const MAX_BODY_BYTES = 500 * 1024; // 500 KB limit for webhooks/queries
+
+  const server = http.createServer(async (req, res) => {
+    // 1. CORS Configuration
+    const requestOrigin = req.headers.origin || "";
+    const allowedOrigin = env.CORS_ORIGIN === "*" ? "*" : env.CORS_ORIGIN;
+
+    if (allowedOrigin === "*" || requestOrigin === allowedOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", requestOrigin || allowedOrigin);
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    }
+
+    res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Webhook-Secret, X-Appwrite-Webhook-Signature, X-Appwrite-Webhook-Event");
+    res.setHeader("Access-Control-Max-Age", "86400");
+
+    // Handle preflight OPTIONS request
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const host = req.headers.host || "127.0.0.1";
+    const url = new URL(req.url, `http://${host}`);
+    const pathname = url.pathname;
+    const querySecret = url.searchParams.get("secret") || "";
+
+    const clientIp =
+      req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
+      req.socket.remoteAddress ||
+      "127.0.0.1";
+
+    // 2. Health Endpoint
+    if (req.method === "GET" && pathname === "/api/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "ok",
+          service: "ask-storynest-rag",
+          model: env.OPENROUTER_CHAT_MODEL,
+          collection: env.QDRANT_COLLECTION_NAME,
+          timestamp: new Date().toISOString(),
+        })
+      );
+      return;
+    }
+
+    // Helper to read JSON body
+    const readJsonBody = () =>
+      new Promise((resolve, reject) => {
+        const contentLength = parseInt(req.headers["content-length"] || "0", 10);
+        if (contentLength > MAX_BODY_BYTES) {
+          const err = new Error("Payload Too Large");
+          err.status = 413;
+          return reject(err);
+        }
+
+        let bodyString = "";
+        let bytesReceived = 0;
+
+        req.on("data", (chunk) => {
+          bytesReceived += chunk.length;
+          if (bytesReceived > MAX_BODY_BYTES) {
+            const err = new Error("Payload Too Large");
+            err.status = 413;
+            req.destroy();
+            return reject(err);
+          }
+          bodyString += chunk;
+        });
+
+        req.on("end", () => {
+          if (!bodyString.trim()) {
+            return resolve({});
+          }
+          try {
+            const parsed = JSON.parse(bodyString);
+            resolve(parsed);
+          } catch {
+            const err = new Error("Invalid JSON body");
+            err.status = 400;
+            reject(err);
+          }
+        });
+
+        req.on("error", (err) => reject(err));
+      });
+
+    // 3. POST /api/ask Endpoint
+    if (req.method === "POST" && pathname === "/api/ask") {
+      if (!rateLimiter.isAllowed(clientIp)) {
+        res.writeHead(429, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: "Too Many Requests",
+            message: "Rate limit exceeded. Please wait a moment before asking another question.",
+          })
+        );
+        return;
+      }
+
+      try {
+        const json = await readJsonBody();
+        const result = await ragService.ask(json);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        if (err.status) {
+          res.writeHead(err.status, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+          return;
+        }
+
+        if (err.name === "ZodError") {
+          const messages = err.issues.map((i) => i.message).join(", ");
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Validation Error", message: messages }));
+          return;
+        }
+
+        console.error("RagServer :: error processing ask request:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: "Internal Server Error",
+            message: "An error occurred while generating the answer. Please try again.",
+          })
+        );
+      }
+      return;
+    }
+
+    // 4. POST /api/webhooks/appwrite Endpoint
+    if (req.method === "POST" && pathname === "/api/webhooks/appwrite") {
+      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret);
+      if (!isAuthValid) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid webhook signature or secret" }));
+        return;
+      }
+
+      try {
+        const body = await readJsonBody();
+        const event =
+          req.headers["x-appwrite-webhook-event"] ||
+          body.event ||
+          "databases.articles.documents.update";
+        const payload = body.payload || body;
+
+        const result = await syncService.handleWebhookEvent({ event, payload });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, result }));
+      } catch (err) {
+        console.error("RagServer :: error in webhook processing:", err.message);
+        res.writeHead(err.status || 500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Webhook processing failed" }));
+      }
+      return;
+    }
+
+    // 5. POST /api/articles/sync-single Endpoint
+    if (req.method === "POST" && pathname === "/api/articles/sync-single") {
+      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret);
+      if (!isAuthValid) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid authorization" }));
+        return;
+      }
+
+      try {
+        const body = await readJsonBody();
+        const { articleId, action = "upsert" } = body;
+        if (!articleId) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Validation Error", message: "articleId is required" }));
+          return;
+        }
+
+        const result = await syncService.syncSingleArticle(articleId, action);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, result }));
+      } catch (err) {
+        console.error("RagServer :: error in single article sync:", err.message);
+        res.writeHead(err.status || 500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Article synchronization failed" }));
+      }
+      return;
+    }
+
+    // 404 Not Found
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Endpoint not found" }));
+  });
+
+  return server;
+}
+
+// Start standalone server if executed directly
+const isDirectExecution =
+  process.argv[1] &&
+  (process.argv[1].endsWith("server.js") || process.argv[1].endsWith("server"));
+
+if (isDirectExecution) {
+  try {
+    const env = getEnv();
+    const server = createServer({ env });
+    server.listen(env.PORT, () => {
+      console.log("==================================================");
+      console.log(`🚀 Ask StoryNest RAG Server running on port ${env.PORT}`);
+      console.log(`• Health Check: http://localhost:${env.PORT}/api/health`);
+      console.log(`• Ask Endpoint: POST http://localhost:${env.PORT}/api/ask`);
+      console.log(`• Appwrite Webhook: POST http://localhost:${env.PORT}/api/webhooks/appwrite`);
+      console.log(`• Single Sync: POST http://localhost:${env.PORT}/api/articles/sync-single`);
+      console.log(`• Allowed CORS: ${env.CORS_ORIGIN}`);
+      console.log(`• Chat Model:   ${env.OPENROUTER_CHAT_MODEL}`);
+      console.log("==================================================");
+    });
+  } catch (err) {
+    console.error("Failed to start server:", err.message);
+    process.exit(1);
+  }
+}
+
+export default createServer;

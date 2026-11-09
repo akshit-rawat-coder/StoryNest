@@ -1,0 +1,22 @@
+{
+  "name": "storynest-rag-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated RAG backend for Ask StoryNest chatbot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "verify": "node handlers/verify.cli.js",
+    "sync": "node handlers/sync.cli.js",
+    "sync:dry-run": "node handlers/sync.cli.js --dry-run",
+    "ask": "node handlers/ask.cli.js"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.13.0",
+    "dotenv": "^16.4.7",
+    "node-appwrite": "^14.1.0",
+    "zod": "^3.24.2"
+  }
+}
