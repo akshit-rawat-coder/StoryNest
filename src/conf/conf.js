@@ -8,6 +8,8 @@ const conf = {
     appwriteCommentsTableId: String(import.meta.env.VITE_APPWRITE_COMMENTS_TABLE_ID || "post_comments"),
     appwriteBookmarksTableId: String(import.meta.env.VITE_APPWRITE_BOOKMARKS_TABLE_ID || "post_bookmarks"),
     appwriteViewsTableId: String(import.meta.env.VITE_APPWRITE_VIEWS_TABLE_ID || "post_views"),
+    ragApiUrl: String(import.meta.env.VITE_RAG_API_URL || "http://localhost:3001"),
+    ragWebhookSecret: String(import.meta.env.VITE_RAG_WEBHOOK_SECRET || ""),
 }
 
  export default conf

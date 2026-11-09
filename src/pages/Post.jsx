@@ -9,6 +9,7 @@ import "react-photo-view/dist/react-photo-view.css";
 import PostSocialActions from "../components/social/PostSocialActions";
 import Comments from "../components/social/Comments";
 import { calculateReadingTime } from "../utils/readingTime";
+import ragService from "../services/ragService";
 
 export default function Post() {
     const [post, setPost] = useState(null);
@@ -24,12 +25,28 @@ export default function Post() {
         if (slug) {
             setIsLoading(true);
             appwriteService.getPost(slug).then((nextPost) => {
-                if (nextPost) setPost(nextPost);
-                else navigate("/");
+                if (nextPost) {
+                    setPost(nextPost);
+                    window.dispatchEvent(
+                        new CustomEvent("storynest:article-context", {
+                            detail: { id: nextPost.$id, title: nextPost.title, slug: nextPost.slug || nextPost.$id },
+                        })
+                    );
+                } else {
+                    navigate("/");
+                }
             }).finally(() => setIsLoading(false));
         } else {
             navigate("/");
         }
+
+        return () => {
+            window.dispatchEvent(
+                new CustomEvent("storynest:article-context", {
+                    detail: null,
+                })
+            );
+        };
     }, [slug, navigate]);
 
     useEffect(() => {
@@ -74,6 +91,8 @@ export default function Post() {
         try {
             const status = await appwriteService.deletePost(post.$id);
             if (status) {
+                // Asynchronously notify RAG backend to purge vector data
+                ragService.notifyArticleChange(post.$id, "delete").catch(() => {});
                 if (post.featuredImage) {
                     appwriteService.deleteFile(post.featuredImage);
                 }

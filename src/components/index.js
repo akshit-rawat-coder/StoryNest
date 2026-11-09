@@ -16,6 +16,7 @@ import ProfileAvatar from "./profile/ProfileAvatar";
 import ProfileForm from "./profile/ProfileForm";
 import ProfileSkeleton from "./profile/ProfileSkeleton";
 import Loader from "./Loader";
+import AskStoryNest from "./chat/AskStoryNest";
 
 export {
     Header,
@@ -36,4 +37,5 @@ export {
     ProfileForm,
     ProfileSkeleton,
     Loader,
+    AskStoryNest,
 }

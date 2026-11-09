@@ -5,6 +5,7 @@ import { Button, Input, RTE, Select } from "..";
 import appwriteService from "../../appwrite/config";
 import profileService from "../../appwrite/profile";
 import aiService from "../../appwrite/ai";
+import ragService from "../../services/ragService";
 import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 
@@ -104,6 +105,8 @@ export default function PostForm({ post }) {
                 const dbPost = await appwriteService.updatePost(post.$id, updateData);
 
                 if (dbPost) {
+                    // Trigger background RAG re-indexing/purging
+                    ragService.notifyArticleChange(dbPost.$id, "upsert").catch(() => {});
                     navigate(`/post/${dbPost.$id}`);
                 }
             } else {
@@ -124,6 +127,8 @@ export default function PostForm({ post }) {
                 const dbPost = await appwriteService.createPost({ ...postDetails, userId: userData.$id });
 
                 if (dbPost) {
+                    // Trigger background RAG indexing
+                    ragService.notifyArticleChange(dbPost.$id, "upsert").catch(() => {});
                     navigate(`/post/${dbPost.$id}`);
                 }
             }
