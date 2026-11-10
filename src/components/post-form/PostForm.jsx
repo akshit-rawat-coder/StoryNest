@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ThreeDot } from "react-loading-indicators";
 import { useForm } from "react-hook-form";
 import { Button, Input, RTE, Select } from "..";
@@ -27,6 +27,16 @@ const CATEGORIES = [
     "General"
 ];
 
+const CheckCircleIcon = ({ className = "h-3.5 w-3.5 shrink-0" }) => (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path
+            fillRule="evenodd"
+            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+            clipRule="evenodd"
+        />
+    </svg>
+);
+
 export default function PostForm({ post }) {
     const { register, handleSubmit, watch, setValue, control, getValues } = useForm({
         defaultValues: {
@@ -49,7 +59,11 @@ export default function PostForm({ post }) {
     const [isGeneratingTitles, setIsGeneratingTitles] = useState(false);
     const [summary, setSummary] = useState("");
     const [titles, setTitles] = useState([]);
+    const [selectedTitle, setSelectedTitle] = useState(null);
+    const [toastMessage, setToastMessage] = useState("");
     const [aiError, setAiError] = useState("");
+    const titleContainerRef = useRef(null);
+    const toastTimerRef = useRef(null);
 
     useEffect(() => {
         if (userData?.$id) {
@@ -152,14 +166,36 @@ export default function PostForm({ post }) {
     }, []);
 
     React.useEffect(() => {
-        const subscription = watch((value, { name }) => {
+        const subscription = watch((value, { name, type }) => {
             if (name === "title") {
                 setValue("slug", slugTransform(value.title), { shouldValidate: true });
+                if (type === "change") {
+                    setSelectedTitle((prev) => (prev && value.title !== prev.text ? null : prev));
+                }
             }
         });
 
         return () => subscription.unsubscribe();
     }, [watch, slugTransform, setValue]);
+
+    useEffect(() => {
+        return () => {
+            if (toastTimerRef.current) {
+                clearTimeout(toastTimerRef.current);
+            }
+        };
+    }, []);
+
+    const showToast = useCallback((message) => {
+        if (toastTimerRef.current) {
+            clearTimeout(toastTimerRef.current);
+        }
+        setToastMessage(message);
+        toastTimerRef.current = setTimeout(() => {
+            setToastMessage("");
+            toastTimerRef.current = null;
+        }, 2500);
+    }, []);
 
     const getEditorTextOnly = () => {
         const rawContent = getValues("content") || "";
@@ -240,6 +276,7 @@ export default function PostForm({ post }) {
             const resTitles = await aiService.generateTitles(rawContent);
             if (resTitles && resTitles.length > 0) {
                 setTitles(resTitles);
+                setSelectedTitle(null);
             } else {
                 throw new Error("No titles received.");
             }
@@ -250,23 +287,78 @@ export default function PostForm({ post }) {
         }
     };
 
+    const handleSelectGeneratedTitle = (titleText, idx) => {
+        const currentTitleValue = getValues("title");
+        const alreadySelectedAndApplied =
+            selectedTitle?.index === idx &&
+            selectedTitle?.text === titleText &&
+            currentTitleValue === titleText;
+
+        setValue("title", titleText, { shouldValidate: true, shouldDirty: true });
+        setValue("slug", slugTransform(titleText), { shouldValidate: true });
+        setSelectedTitle({ index: idx, text: titleText });
+
+        if (!alreadySelectedAndApplied) {
+            showToast("Title applied successfully");
+        }
+
+        const titleEl = titleContainerRef.current;
+        if (titleEl && typeof titleEl.getBoundingClientRect === "function") {
+            const rect = titleEl.getBoundingClientRect();
+            const headerOffset = 96;
+            if (rect.top < headerOffset || rect.bottom > window.innerHeight) {
+                titleEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }
+        }
+    };
+
+    const currentTitle = watch("title");
+    const isGeneratedTitleApplied = Boolean(selectedTitle && currentTitle === selectedTitle.text);
     const isEditMode = Boolean(post);
 
     return (
-        <form onSubmit={handleSubmit(submit)} className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-6">
-                <div className="mb-5">
-                    <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Editor</h2>
-                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                        Write your content and keep your story clear and engaging.
-                    </p>
+        <>
+            {toastMessage && (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="fixed top-20 right-6 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-white/95 px-4 py-2.5 text-sm font-medium text-emerald-700 shadow-lg backdrop-blur-md transition-all dark:border-emerald-500/40 dark:bg-slate-900/95 dark:text-emerald-300"
+                >
+                    <CheckCircleIcon className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <span>{toastMessage}</span>
                 </div>
-                <div className="space-y-4">
-                    <Input
-                        label="Title :"
-                        placeholder="Title"
-                        {...register("title", { required: true })}
-                    />
+            )}
+            <form onSubmit={handleSubmit(submit)} className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-6">
+                    <div className="mb-5">
+                        <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Editor</h2>
+                        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                            Write your content and keep your story clear and engaging.
+                        </p>
+                    </div>
+                    <div className="space-y-4">
+                        <div ref={titleContainerRef} className="scroll-mt-28">
+                            <Input
+                                label="Title :"
+                                placeholder="Title"
+                                className={
+                                    isGeneratedTitleApplied
+                                        ? "!border-emerald-500 ring-2 ring-emerald-500/20 focus:!border-emerald-500 focus:ring-emerald-500/25 dark:!border-emerald-400 dark:ring-emerald-400/20 dark:focus:!border-emerald-400 dark:focus:ring-emerald-400/25"
+                                        : ""
+                                }
+                                {...register("title", { required: true })}
+                            />
+                            {isGeneratedTitleApplied && (
+                                <p
+                                    role="status"
+                                    aria-live="polite"
+                                    className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+                                >
+                                    <CheckCircleIcon />
+                                    Generated title applied
+                                </p>
+                            )}
+                        </div>
                     <Input
                         label="Slug :"
                         placeholder="Slug"
@@ -384,20 +476,35 @@ export default function PostForm({ post }) {
                                     Dismiss
                                 </button>
                             </div>
-                            <div className="space-y-2">
-                                {titles.map((titleText, idx) => (
-                                    <button
-                                        key={idx}
-                                        type="button"
-                                        onClick={() => {
-                                            setValue("title", titleText);
-                                            setValue("slug", slugTransform(titleText), { shouldValidate: true });
-                                        }}
-                                        className="w-full text-left p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-500 hover:bg-indigo-50/30 text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/50 dark:hover:bg-indigo-950/30 transition-all font-medium"
-                                    >
-                                        {titleText}
-                                    </button>
-                                ))}
+                            <div className="space-y-2" role="group" aria-label="AI-generated title suggestions">
+                                {titles.map((titleText, idx) => {
+                                    const isSelected =
+                                        selectedTitle?.index === idx &&
+                                        selectedTitle?.text === titleText &&
+                                        currentTitle === titleText;
+
+                                    return (
+                                        <button
+                                            key={idx}
+                                            type="button"
+                                            aria-pressed={isSelected}
+                                            onClick={() => handleSelectGeneratedTitle(titleText, idx)}
+                                            className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-indigo-400 dark:focus-visible:ring-offset-slate-900 ${
+                                                isSelected
+                                                    ? "border-indigo-500 bg-indigo-50/80 text-indigo-950 ring-1 ring-indigo-500/40 dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-white dark:ring-indigo-400/30"
+                                                    : "border-slate-200 bg-white text-slate-800 hover:border-indigo-400 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-950/40"
+                                            }`}
+                                        >
+                                            <span className="flex-1 leading-snug">{titleText}</span>
+                                            {isSelected && (
+                                                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                                    <CheckCircleIcon />
+                                                    Selected
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
@@ -478,5 +585,6 @@ export default function PostForm({ post }) {
                 </div>
             </aside>
         </form>
+        </>
     );
 }
