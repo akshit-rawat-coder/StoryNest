@@ -1,15 +1,16 @@
 import crypto from "node:crypto";
-import { Client, Databases, Query } from "node-appwrite";
+import { Client, TablesDB, Query } from "node-appwrite";
 import { cleanHtml } from "../pipeline/html.cleaner.js";
 
 /**
- * Production-grade synchronization service for StoryNest RAG.
+ * Production-grade synchronization service for StoryNest RAG using Appwrite TablesDB.
  * Features:
- * - HMAC-SHA1 signature and secret verification
+ * - Official Appwrite HMAC-SHA1 signature verification
+ * - Strict TablesDB event filtering (articles table only; ignores sync_jobs)
  * - Stale upsert & stale delete protection
  * - Durable job lifecycle (pending -> processing -> completed / failed)
  * - Expiring worker leases preventing concurrent collisions
- * - Reconciliation engine to detect and fix missing or stale vector points
+ * - Reconciliation engine using TablesDB.listRows()
  */
 export class SyncService {
   /**
@@ -17,9 +18,9 @@ export class SyncService {
    * @param {import("../pipeline/article.processor.js").ArticleProcessor} options.processor
    * @param {Object} options.env
    * @param {import("./job.store.js").SyncJobStore} [options.jobStore]
-   * @param {Databases} [options.databases]
+   * @param {import("node-appwrite").TablesDB} [options.tablesDB]
    */
-  constructor({ processor, env, jobStore, databases }) {
+  constructor({ processor, env, jobStore, tablesDB }) {
     if (!processor) throw new Error("SyncService: processor is required");
     if (!env) throw new Error("SyncService: env is required");
 
@@ -28,15 +29,15 @@ export class SyncService {
     this.jobStore = jobStore || null;
     this.inFlightSyncs = new Map();
 
-    if (databases) {
-      this.databases = databases;
+    if (tablesDB) {
+      this.tablesDB = tablesDB;
     } else {
       const appwriteClient = new Client();
       appwriteClient
         .setEndpoint(env.APPWRITE_ENDPOINT)
         .setProject(env.APPWRITE_PROJECT_ID)
         .setKey(env.APPWRITE_API_KEY);
-      this.databases = new Databases(appwriteClient);
+      this.tablesDB = new TablesDB(appwriteClient);
     }
   }
 
@@ -207,19 +208,90 @@ export class SyncService {
   }
 
   /**
+   * Validates whether an incoming Appwrite webhook event targets the configured
+   * database and articles table. Explicitly ignores sync_jobs and other tables.
+   *
+   * @param {string} event
+   * @returns {{ valid: boolean, reason?: string }}
+   */
+  validateWebhookEvent(event = "") {
+    if (!event || typeof event !== "string") {
+      return { valid: false, reason: "missing_event_name" };
+    }
+
+    const dbId = this.env.APPWRITE_DATABASE_ID;
+    const articlesTableId =
+      this.env.APPWRITE_TABLE_ID || this.env.APPWRITE_COLLECTION_ID || "articles";
+    const syncJobsTableId =
+      this.env.APPWRITE_SYNC_JOBS_TABLE_ID || "6af2a4b5001496679e4c";
+
+    // Strictly ignore events originating from the sync_jobs table (by name or ID)
+    if (
+      event.includes(".tables.sync_jobs.") ||
+      event.includes(`.tables.${syncJobsTableId}.`) ||
+      event.includes(".collections.sync_jobs.") ||
+      event.includes(`.collections.${syncJobsTableId}.`)
+    ) {
+      return { valid: false, reason: "ignored_sync_jobs_event" };
+    }
+
+    // Match TablesDB format: tablesdb.<dbId>.tables.<tableId>.rows.<rowId>.<action>
+    const tablesMatch = event.match(
+      /^tablesdb\.([^.]+)\.tables\.([^.]+)\.rows\.([^.]+)\.(create|update|delete)$/
+    );
+    if (tablesMatch) {
+      const [, eventDbId, eventTableId] = tablesMatch;
+      if (eventDbId !== dbId) {
+        return { valid: false, reason: "database_mismatch" };
+      }
+      if (eventTableId !== articlesTableId) {
+        return { valid: false, reason: "non_articles_table" };
+      }
+      return { valid: true };
+    }
+
+    // Backward compatibility for legacy test event format matching target DB & table
+    const dbMatch = event.match(
+      /^databases\.([^.]+)\.collections\.([^.]+)\.documents\.([^.]+)\.(create|update|delete)$/
+    );
+    if (dbMatch) {
+      const [, eventDbId, eventCollectionId] = dbMatch;
+      if (eventDbId !== dbId) {
+        return { valid: false, reason: "database_mismatch" };
+      }
+      if (eventCollectionId !== articlesTableId) {
+        return { valid: false, reason: "non_articles_table" };
+      }
+      return { valid: true };
+    }
+
+    return { valid: false, reason: "unsupported_event_target" };
+  }
+
+  /**
    * Handles an incoming Appwrite webhook event payload.
    *
    * @param {Object} options
    * @param {string} options.event - Exact Appwrite event name
-   * @param {Object} options.payload - Appwrite document payload
+   * @param {Object} options.payload - Appwrite row payload
    * @returns {Promise<Object>}
    */
   async handleWebhookEvent({ event = "", payload = {} }) {
-    if (!payload || !payload.$id) {
-      throw new Error("Invalid webhook payload: document $id is required");
+    const validation = this.validateWebhookEvent(event);
+    if (!validation.valid) {
+      return {
+        action: "ignored",
+        reason: validation.reason,
+        event,
+      };
     }
 
-    const articleId = String(payload.$id);
+    const rowId = payload?.$id || payload?.rowId;
+    if (!payload || !rowId) {
+      throw new Error("Invalid webhook payload: row $id is required");
+    }
+
+    const articleId = String(rowId);
     const isDelete = event.endsWith(".delete") || event.includes(".delete.");
     const articleUpdatedAt = payload.$updatedAt || payload.$createdAt || new Date().toISOString();
 
@@ -355,21 +427,24 @@ export class SyncService {
     }
 
     const syncPromise = (async () => {
+      const targetTableId =
+        this.env.APPWRITE_TABLE_ID || this.env.APPWRITE_COLLECTION_ID || "articles";
+
       // ------------------------------------------------------------------
       // Action: DELETE
       // ------------------------------------------------------------------
       if (action === "delete") {
         // STALE DELETE GUARD:
-        // Before deleting vectors from Qdrant, check Appwrite:
-        // If the document currently exists in Appwrite, is active, and was updated
+        // Before deleting vectors from Qdrant, check Appwrite TablesDB:
+        // If the row currently exists in Appwrite, is active, and was updated
         // AFTER the delete event timestamp, an older delete event must NOT remove active content!
-        if (typeof this.databases?.getDocument === "function") {
+        if (typeof this.tablesDB?.getRow === "function") {
           try {
-            const currentDoc = await this.databases.getDocument(
-              this.env.APPWRITE_DATABASE_ID,
-              this.env.APPWRITE_COLLECTION_ID,
-              articleId
-            );
+            const currentDoc = await this.tablesDB.getRow({
+              databaseId: this.env.APPWRITE_DATABASE_ID,
+              tableId: targetTableId,
+              rowId: articleId,
+            });
 
             if (currentDoc && currentDoc.status === "active") {
               const currentUpdatedTime = new Date(currentDoc.$updatedAt || currentDoc.$createdAt).getTime();
@@ -383,7 +458,7 @@ export class SyncService {
               }
             }
           } catch (err) {
-            // If 404, article was genuinely deleted in Appwrite -> proceed with vector purge
+            // If 404, article row was genuinely deleted in Appwrite -> proceed with vector purge
             if (err.code !== 404 && !err.message?.includes("could not be found")) {
               console.warn(`[SyncService] Warning during delete guard check for ${articleId}:`, err.message);
             }
@@ -400,15 +475,17 @@ export class SyncService {
       // ------------------------------------------------------------------
       let articleToProcess = doc;
 
-      // Always fetch latest document from Appwrite to guarantee data freshness and prevent stale overwrites
-      if (typeof this.databases?.getDocument === "function") {
+      // Always fetch latest row from Appwrite TablesDB to guarantee data freshness and prevent stale overwrites
+      if (typeof this.tablesDB?.getRow === "function") {
         try {
-          const latestDoc = await this.databases.getDocument(
-            this.env.APPWRITE_DATABASE_ID,
-            this.env.APPWRITE_COLLECTION_ID,
-            articleId
-          );
-          articleToProcess = latestDoc;
+          const latestDoc = await this.tablesDB.getRow({
+            databaseId: this.env.APPWRITE_DATABASE_ID,
+            tableId: targetTableId,
+            rowId: articleId,
+          });
+          if (latestDoc) {
+            articleToProcess = latestDoc;
+          }
         } catch (err) {
           if (err.code === 404 || err.message?.includes("could not be found")) {
             console.log(`[SyncService] Article ${articleId} not found in Appwrite. Purging vectors.`);
@@ -537,14 +614,17 @@ export class SyncService {
     let hasMore = true;
     const activeDocIds = new Set();
 
-    while (hasMore) {
-      const response = await this.databases.listDocuments(
-        this.env.APPWRITE_DATABASE_ID,
-        this.env.APPWRITE_COLLECTION_ID,
-        [Query.limit(batchSize), Query.offset(offset)]
-      );
+    const targetTableId =
+      this.env.APPWRITE_TABLE_ID || this.env.APPWRITE_COLLECTION_ID || "articles";
 
-      const docs = response.documents || [];
+    while (hasMore) {
+      const response = await this.tablesDB.listRows({
+        databaseId: this.env.APPWRITE_DATABASE_ID,
+        tableId: targetTableId,
+        queries: [Query.limit(batchSize), Query.offset(offset)],
+      });
+
+      const docs = response?.rows || [];
       if (docs.length === 0) {
         hasMore = false;
         break;

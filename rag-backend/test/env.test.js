@@ -38,10 +38,28 @@ describe("Environment Validation", () => {
 
     const parsed = envSchema.parse(minimalConfig);
     assert.equal(parsed.NODE_ENV, "development");
+    assert.equal(parsed.APPWRITE_TABLE_ID, "articles");
+    assert.equal(parsed.APPWRITE_SYNC_JOBS_TABLE_ID, "6af2a4b5001496679e4c");
     assert.equal(parsed.APPWRITE_COLLECTION_ID, "articles");
     assert.equal(parsed.QDRANT_COLLECTION_NAME, "storynest");
     assert.equal(parsed.OPENROUTER_EMBEDDING_MODEL, "openai/text-embedding-3-small");
     assert.equal(parsed.OPENROUTER_BASE_URL, "https://openrouter.ai/api/v1");
+  });
+
+  test("preserves backward compatibility when only APPWRITE_COLLECTION_ID is set", () => {
+    const legacyConfig = {
+      APPWRITE_PROJECT_ID: "proj_123",
+      APPWRITE_DATABASE_ID: "db_123",
+      APPWRITE_COLLECTION_ID: "custom_articles_table",
+      APPWRITE_API_KEY: "key_123",
+      QDRANT_URL: "https://cluster.qdrant.io:6333",
+      QDRANT_API_KEY: "q_key",
+      OPENROUTER_API_KEY: "or_key",
+    };
+
+    const parsed = envSchema.parse(legacyConfig);
+    assert.equal(parsed.APPWRITE_TABLE_ID, "custom_articles_table");
+    assert.equal(parsed.APPWRITE_COLLECTION_ID, "custom_articles_table");
   });
 
   test("fails if required keys are missing", () => {

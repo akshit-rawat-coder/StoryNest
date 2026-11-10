@@ -237,7 +237,7 @@ describe("HTTP Server Endpoint Tests", () => {
       headers: {
         "Content-Type": "application/json",
         "X-Webhook-Secret": "correct_secret",
-        "X-Appwrite-Webhook-Event": "databases.db.collections.col.documents.doc_1.create",
+        "X-Appwrite-Webhook-Event": "tablesdb.6a53b1a4002566268803.tables.articles.rows.doc_1.create",
       },
       body: JSON.stringify({ $id: "doc_1", title: "New Story" }),
     });

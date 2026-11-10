@@ -2,12 +2,14 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { SyncService } from "../services/sync.service.js";
+import { SyncJobStore } from "../services/job.store.js";
 
 describe("SyncService Unit Tests", () => {
   const mockEnv = {
     WEBHOOK_SECRET: "test_secret_123",
-    APPWRITE_DATABASE_ID: "test_db",
-    APPWRITE_COLLECTION_ID: "test_articles",
+    APPWRITE_DATABASE_ID: "6a53b1a4002566268803",
+    APPWRITE_TABLE_ID: "articles",
+    APPWRITE_SYNC_JOBS_TABLE_ID: "6af2a4b5001496679e4c",
     APPWRITE_ENDPOINT: "https://cloud.appwrite.io/v1",
     APPWRITE_PROJECT_ID: "test_project",
     APPWRITE_API_KEY: "test_key",
@@ -17,7 +19,7 @@ describe("SyncService Unit Tests", () => {
     const service = new SyncService({
       processor: { processArticle: async () => {}, deleteArticle: async () => {} },
       env: mockEnv,
-      databases: {},
+      tablesDB: {},
     });
 
     const url = "https://storynest.example.com/api/webhooks/appwrite";
@@ -82,7 +84,7 @@ describe("SyncService Unit Tests", () => {
     const service = new SyncService({
       processor: { processArticle: async () => {}, deleteArticle: async () => {} },
       env: { ...mockEnv, CRON_SECRET: "cron_secret_789" },
-      databases: {},
+      tablesDB: {},
     });
 
     // Valid authorization header
@@ -118,7 +120,7 @@ describe("SyncService Unit Tests", () => {
     );
   });
 
-  test("handleWebhookEvent handles delete event", async () => {
+  test("handleWebhookEvent handles TablesDB delete event", async () => {
     let deletedId = null;
     const mockProcessor = {
       deleteArticle: async (id) => {
@@ -131,11 +133,11 @@ describe("SyncService Unit Tests", () => {
     const service = new SyncService({
       processor: mockProcessor,
       env: mockEnv,
-      databases: {},
+      tablesDB: {},
     });
 
     const result = await service.handleWebhookEvent({
-      event: "databases.test_db.collections.test_articles.documents.doc_123.delete",
+      event: "tablesdb.6a53b1a4002566268803.tables.articles.rows.doc_123.delete",
       payload: { $id: "doc_123" },
     });
 
@@ -143,7 +145,7 @@ describe("SyncService Unit Tests", () => {
     assert.deepEqual(result, { deleted: true });
   });
 
-  test("handleWebhookEvent handles create/update event", async () => {
+  test("handleWebhookEvent handles TablesDB create/update event", async () => {
     let processedDoc = null;
     const mockProcessor = {
       deleteArticle: async () => {},
@@ -156,11 +158,11 @@ describe("SyncService Unit Tests", () => {
     const service = new SyncService({
       processor: mockProcessor,
       env: mockEnv,
-      databases: {},
+      tablesDB: {},
     });
 
     const result = await service.handleWebhookEvent({
-      event: "databases.test_db.collections.test_articles.documents.doc_456.create",
+      event: "tablesdb.6a53b1a4002566268803.tables.articles.rows.doc_456.create",
       payload: { $id: "doc_456", title: "New Article", status: "active" },
     });
 
@@ -169,16 +171,69 @@ describe("SyncService Unit Tests", () => {
     assert.equal(result.chunksCount, 5);
   });
 
-  test("handleWebhookEvent rejects payload without $id", async () => {
+  test("handleWebhookEvent ignores sync_jobs and non-articles table events", async () => {
+    let called = false;
+    const service = new SyncService({
+      processor: {
+        processArticle: async () => {
+          called = true;
+        },
+        deleteArticle: async () => {
+          called = true;
+        },
+      },
+      env: mockEnv,
+      tablesDB: {},
+    });
+
+    // 1. sync_jobs by table ID
+    const resSyncJobsId = await service.handleWebhookEvent({
+      event: "tablesdb.6a53b1a4002566268803.tables.6af2a4b5001496679e4c.rows.job_1.create",
+      payload: { $id: "job_1", articleId: "art_1", status: "pending" },
+    });
+    assert.equal(resSyncJobsId.action, "ignored");
+    assert.equal(resSyncJobsId.reason, "ignored_sync_jobs_event");
+    assert.equal(called, false);
+
+    // 2. sync_jobs by name
+    const resSyncJobsName = await service.handleWebhookEvent({
+      event: "tablesdb.6a53b1a4002566268803.tables.sync_jobs.rows.job_2.update",
+      payload: { $id: "job_2" },
+    });
+    assert.equal(resSyncJobsName.action, "ignored");
+    assert.equal(resSyncJobsName.reason, "ignored_sync_jobs_event");
+
+    // 3. Another table in the same database
+    const resOtherTable = await service.handleWebhookEvent({
+      event: "tablesdb.6a53b1a4002566268803.tables.comments.rows.c_1.create",
+      payload: { $id: "c_1" },
+    });
+    assert.equal(resOtherTable.action, "ignored");
+    assert.equal(resOtherTable.reason, "non_articles_table");
+
+    // 4. Different database ID
+    const resOtherDb = await service.handleWebhookEvent({
+      event: "tablesdb.wrong_db.tables.articles.rows.art_1.create",
+      payload: { $id: "art_1" },
+    });
+    assert.equal(resOtherDb.action, "ignored");
+    assert.equal(resOtherDb.reason, "database_mismatch");
+  });
+
+  test("handleWebhookEvent rejects valid article event payload without $id", async () => {
     const service = new SyncService({
       processor: { processArticle: async () => {}, deleteArticle: async () => {} },
       env: mockEnv,
-      databases: {},
+      tablesDB: {},
     });
 
     await assert.rejects(
-      async () => service.handleWebhookEvent({ event: "create", payload: {} }),
-      /document \$id is required/
+      async () =>
+        service.handleWebhookEvent({
+          event: "tablesdb.6a53b1a4002566268803.tables.articles.rows.*.create",
+          payload: {},
+        }),
+      /row \$id is required/
     );
   });
 
@@ -195,7 +250,7 @@ describe("SyncService Unit Tests", () => {
     const service = new SyncService({
       processor: mockProcessor,
       env: mockEnv,
-      databases: {},
+      tablesDB: {},
     });
 
     const result = await service.syncSingleArticle("art_del", "delete");
@@ -203,17 +258,13 @@ describe("SyncService Unit Tests", () => {
     assert.deepEqual(result, { deleted: true });
   });
 
-  test("syncSingleArticle fetches document from Appwrite on upsert", async () => {
-    let fetchedDatabaseId = null;
-    let fetchedCollectionId = null;
-    let fetchedDocId = null;
+  test("syncSingleArticle fetches row from Appwrite TablesDB using getRow on upsert", async () => {
+    let fetchedParams = null;
 
-    const mockDatabases = {
-      getDocument: async (dbId, colId, docId) => {
-        fetchedDatabaseId = dbId;
-        fetchedCollectionId = colId;
-        fetchedDocId = docId;
-        return { $id: docId, title: "Fetched Post", status: "active", content: "<p>Text</p>" };
+    const mockTablesDB = {
+      getRow: async (params) => {
+        fetchedParams = params;
+        return { $id: params.rowId, title: "Fetched Post", status: "active", content: "<p>Text</p>" };
       },
     };
 
@@ -229,21 +280,23 @@ describe("SyncService Unit Tests", () => {
     const service = new SyncService({
       processor: mockProcessor,
       env: mockEnv,
-      databases: mockDatabases,
+      tablesDB: mockTablesDB,
     });
 
     const result = await service.syncSingleArticle("art_fetch", "upsert");
-    assert.equal(fetchedDatabaseId, "test_db");
-    assert.equal(fetchedCollectionId, "test_articles");
-    assert.equal(fetchedDocId, "art_fetch");
+    assert.deepEqual(fetchedParams, {
+      databaseId: "6a53b1a4002566268803",
+      tableId: "articles",
+      rowId: "art_fetch",
+    });
     assert.equal(processedDoc.title, "Fetched Post");
     assert.equal(result.action, "indexed");
   });
 
-  test("syncSingleArticle purges vector if Appwrite returns 404", async () => {
-    const mockDatabases = {
-      getDocument: async () => {
-        const err = new Error("Document not found");
+  test("syncSingleArticle purges vector if TablesDB returns 404", async () => {
+    const mockTablesDB = {
+      getRow: async () => {
+        const err = new Error("Row could not be found");
         err.code = 404;
         throw err;
       },
@@ -261,12 +314,84 @@ describe("SyncService Unit Tests", () => {
     const service = new SyncService({
       processor: mockProcessor,
       env: mockEnv,
-      databases: mockDatabases,
+      tablesDB: mockTablesDB,
     });
 
     const result = await service.syncSingleArticle("art_missing", "upsert");
     assert.equal(deletedId, "art_missing");
     assert.equal(result.deleted, true);
+  });
+
+  test("SyncJobStore calls TablesDB createRow, getRow, updateRow, listRows with sync_jobs table ID", async () => {
+    const calls = [];
+    const rowsMap = new Map();
+
+    const mockTablesDB = {
+      createRow: async (params) => {
+        calls.push({ method: "createRow", params });
+        const row = { $id: "job_row_1", ...params.data, $createdAt: "2026-11-10T00:00:00Z", $updatedAt: "2026-11-10T00:00:00Z" };
+        rowsMap.set(row.$id, row);
+        return row;
+      },
+      getRow: async (params) => {
+        calls.push({ method: "getRow", params });
+        return rowsMap.get(params.rowId);
+      },
+      updateRow: async (params) => {
+        calls.push({ method: "updateRow", params });
+        const existing = rowsMap.get(params.rowId);
+        const updated = { ...existing, ...params.data };
+        rowsMap.set(params.rowId, updated);
+        return updated;
+      },
+      listRows: async (params) => {
+        calls.push({ method: "listRows", params });
+        const all = Array.from(rowsMap.values());
+        return { total: all.length, rows: all };
+      },
+    };
+
+    const store = new SyncJobStore({
+      tablesDB: mockTablesDB,
+      databaseId: "6a53b1a4002566268803",
+      tableId: "6af2a4b5001496679e4c",
+      nodeEnv: "production",
+    });
+
+    // 1. createRow
+    const created = await store.createJob({
+      articleId: "art_1",
+      action: "upsert",
+      event: "tablesdb.6a53b1a4002566268803.tables.articles.rows.art_1.create",
+      contentHash: "hash123",
+    });
+    assert.equal(created.$id, "job_row_1");
+    assert.equal(calls[0].method, "createRow");
+    assert.equal(calls[0].params.databaseId, "6a53b1a4002566268803");
+    assert.equal(calls[0].params.tableId, "6af2a4b5001496679e4c");
+
+    // 2. listRows (reads response.rows)
+    const due = await store.findDueJobs(5);
+    assert.equal(due.length, 1);
+    assert.equal(due[0].$id, "job_row_1");
+    assert.equal(calls[1].method, "listRows");
+    assert.equal(calls[1].params.tableId, "6af2a4b5001496679e4c");
+
+    // 3. getRow + updateRow on acquireLease
+    const leased = await store.acquireLease("job_row_1", 60000);
+    assert.equal(leased.status, "processing");
+    assert.equal(leased.attempts, 1);
+    assert.ok(calls.some((c) => c.method === "getRow" && c.params.rowId === "job_row_1"));
+    assert.ok(calls.some((c) => c.method === "updateRow" && c.params.rowId === "job_row_1"));
+
+    // 4. markCompleted -> updateRow
+    const completed = await store.markCompleted("job_row_1");
+    assert.equal(completed.status, "completed");
+
+    // 5. getJobStats -> listRows (reads response.rows)
+    const stats = await store.getJobStats();
+    assert.equal(stats.metrics.completed, 1);
+    assert.equal(stats.recentJobs[0].jobId, "job_row_1");
   });
 });
 

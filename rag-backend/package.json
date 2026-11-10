@@ -16,7 +16,7 @@
   "dependencies": {
     "@qdrant/js-client-rest": "^1.13.0",
     "dotenv": "^16.4.7",
-    "node-appwrite": "^14.1.0",
+    "node-appwrite": "^31.1.0",
     "zod": "^3.24.2"
   }
 }

@@ -1,5 +1,5 @@
 import http from "node:http";
-import { Client, Databases } from "node-appwrite";
+import { Client, TablesDB } from "node-appwrite";
 import { getEnv } from "./config/env.js";
 import { createEmbeddingProvider } from "./providers/index.js";
 import { createQdrantClient } from "./vector/qdrant.client.js";
@@ -105,13 +105,14 @@ export function createRequestHandler(options = {}) {
         .setEndpoint(env.APPWRITE_ENDPOINT)
         .setProject(env.APPWRITE_PROJECT_ID)
         .setKey(env.APPWRITE_API_KEY);
-      const databases = new Databases(appwriteClient);
+      const tablesDB = new TablesDB(appwriteClient);
 
       const jobStore =
         options.jobStore ||
         new SyncJobStore({
-          databases,
+          tablesDB,
           databaseId: env.APPWRITE_DATABASE_ID,
+          tableId: env.APPWRITE_SYNC_JOBS_TABLE_ID,
           nodeEnv: env.NODE_ENV,
         });
 
@@ -119,7 +120,7 @@ export function createRequestHandler(options = {}) {
         processor: articleProcessor,
         env,
         jobStore,
-        databases,
+        tablesDB,
       });
     }
   }
@@ -365,11 +366,13 @@ export function createRequestHandler(options = {}) {
       }
 
       try {
+        const payload = body.payload || body;
+        const defaultTableId = env.APPWRITE_TABLE_ID || env.APPWRITE_COLLECTION_ID || "articles";
+        const defaultRowId = payload?.$id || payload?.rowId || "*";
         const event =
           req.headers["x-appwrite-webhook-event"] ||
           body.event ||
-          "databases.articles.documents.update";
-        const payload = body.payload || body;
+          `tablesdb.${env.APPWRITE_DATABASE_ID}.tables.${defaultTableId}.rows.${defaultRowId}.update`;
 
         const result = await syncService.handleWebhookEvent({ event, payload });
         res.writeHead(200, { "Content-Type": "application/json" });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Client, Databases, Query } from "node-appwrite";
+import { Client, TablesDB, Query } from "node-appwrite";
 import { getEnv } from "../config/env.js";
 import { createEmbeddingProvider } from "../providers/index.js";
 import { createQdrantClient } from "../vector/qdrant.client.js";
@@ -62,7 +62,7 @@ async function runSync() {
     .setProject(env.APPWRITE_PROJECT_ID)
     .setKey(env.APPWRITE_API_KEY);
 
-  const databases = new Databases(appwriteClient);
+  const tablesDB = new TablesDB(appwriteClient);
 
   // 2. Initialize Qdrant Client & Check Collection
   console.log(`2. Connecting to Qdrant cluster...`);
@@ -90,9 +90,10 @@ async function runSync() {
     process.exit(1);
   }
 
-  // 3. Process Articles from Appwrite Database
+  // 3. Process Articles from Appwrite TablesDB
+  const tableId = env.APPWRITE_TABLE_ID || env.APPWRITE_COLLECTION_ID || "articles";
   console.log(
-    `3. Querying Appwrite database "${env.APPWRITE_DATABASE_ID}", collection "${env.APPWRITE_COLLECTION_ID}"...`
+    `3. Querying Appwrite database "${env.APPWRITE_DATABASE_ID}", table "${tableId}"...`
   );
 
   const BATCH_LIMIT = 50;
@@ -130,13 +131,13 @@ async function runSync() {
       queries.push(Query.equal("$id", targetArticleId));
     }
 
-    const response = await databases.listDocuments(
-      env.APPWRITE_DATABASE_ID,
-      env.APPWRITE_COLLECTION_ID,
-      queries
-    );
+    const response = await tablesDB.listRows({
+      databaseId: env.APPWRITE_DATABASE_ID,
+      tableId,
+      queries,
+    });
 
-    const documents = response.documents || [];
+    const documents = response.rows || [];
     if (documents.length === 0) {
       hasMore = false;
       break;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Client, Databases, Query } from "node-appwrite";
+import { Client, TablesDB, Query } from "node-appwrite";
 import { getEnv } from "../config/env.js";
 import { createEmbeddingProvider } from "../providers/index.js";
 import { createQdrantClient } from "../vector/qdrant.client.js";
@@ -121,9 +121,9 @@ async function verifyAll() {
   }
 
   // ----------------------------------------------------------------
-  // 3. Appwrite Connection & Collection Schema Verification
+  // 3. Appwrite TablesDB Connection & Schema Verification
   // ----------------------------------------------------------------
-  console.log("3. Verifying Appwrite Database & Articles Collection...");
+  console.log("3. Verifying Appwrite TablesDB & Tables...");
   const t2 = Date.now();
   try {
     const appwriteClient = new Client();
@@ -132,13 +132,21 @@ async function verifyAll() {
       .setProject(env.APPWRITE_PROJECT_ID)
       .setKey(env.APPWRITE_API_KEY);
 
-    const databases = new Databases(appwriteClient);
+    const tablesDB = new TablesDB(appwriteClient);
+    const articlesTableId = env.APPWRITE_TABLE_ID || env.APPWRITE_COLLECTION_ID || "articles";
+    const syncJobsTableId = env.APPWRITE_SYNC_JOBS_TABLE_ID || "6af2a4b5001496679e4c";
 
-    const response = await databases.listDocuments(
-      env.APPWRITE_DATABASE_ID,
-      env.APPWRITE_COLLECTION_ID,
-      [Query.limit(1)]
-    );
+    const response = await tablesDB.listRows({
+      databaseId: env.APPWRITE_DATABASE_ID,
+      tableId: articlesTableId,
+      queries: [Query.limit(1)],
+    });
+
+    const jobsResponse = await tablesDB.listRows({
+      databaseId: env.APPWRITE_DATABASE_ID,
+      tableId: syncJobsTableId,
+      queries: [Query.limit(1)],
+    });
 
     const duration = Date.now() - t2;
     results.appwrite.success = true;
@@ -146,18 +154,20 @@ async function verifyAll() {
       endpoint: env.APPWRITE_ENDPOINT,
       projectId: env.APPWRITE_PROJECT_ID,
       databaseId: env.APPWRITE_DATABASE_ID,
-      collectionId: env.APPWRITE_COLLECTION_ID,
-      totalDocuments: response.total,
+      articlesTableId,
+      syncJobsTableId,
+      totalRows: response.total,
+      totalSyncJobs: jobsResponse.total,
       latencyMs: duration,
     };
 
-    console.log(`   ✓ Appwrite: SUCCESS (${duration}ms)`);
+    console.log(`   ✓ Appwrite TablesDB: SUCCESS (${duration}ms)`);
     console.log(`     Database ID: ${env.APPWRITE_DATABASE_ID}`);
-    console.log(`     Collection: ${env.APPWRITE_COLLECTION_ID}`);
-    console.log(`     Accessible Articles: ${response.total} total documents found\n`);
+    console.log(`     Articles Table: ${articlesTableId} (${response.total} total rows)`);
+    console.log(`     Sync Jobs Table: ${syncJobsTableId} (${jobsResponse.total} total rows)\n`);
   } catch (err) {
     results.appwrite.error = sanitize(err.message, secrets);
-    console.error(`   ✗ Appwrite: FAILED`);
+    console.error(`   ✗ Appwrite TablesDB: FAILED`);
     console.error(`     Error: ${results.appwrite.error}\n`);
   }
 

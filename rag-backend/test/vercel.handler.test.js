@@ -182,7 +182,7 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
       headers: {
         host: "storynest-rag.vercel.app",
         "x-webhook-secret": "secret_123",
-        "x-appwrite-webhook-event": "databases.db.collections.col.documents.doc_99.create",
+        "x-appwrite-webhook-event": "tablesdb.6a53b1a4002566268803.tables.articles.rows.doc_99.create",
       },
       body: { $id: "doc_99", title: "New Doc" },
     };

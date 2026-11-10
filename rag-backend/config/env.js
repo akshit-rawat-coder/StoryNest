@@ -13,11 +13,13 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
 
-  // Appwrite (Server-side admin credentials)
+  // Appwrite (Server-side admin credentials & TablesDB IDs)
   APPWRITE_ENDPOINT: z.string().url().default("https://fra.cloud.appwrite.io/v1"),
   APPWRITE_PROJECT_ID: z.string().min(1, "APPWRITE_PROJECT_ID is required"),
   APPWRITE_DATABASE_ID: z.string().min(1, "APPWRITE_DATABASE_ID is required"),
-  APPWRITE_COLLECTION_ID: z.string().min(1).default("articles"),
+  APPWRITE_TABLE_ID: z.string().min(1).optional(),
+  APPWRITE_SYNC_JOBS_TABLE_ID: z.string().min(1).default("6af2a4b5001496679e4c"),
+  APPWRITE_COLLECTION_ID: z.string().min(1).optional(),
   APPWRITE_API_KEY: z.string().min(1, "APPWRITE_API_KEY is required"),
 
   // Qdrant Vector Database
@@ -53,6 +55,13 @@ export const envSchema = z.object({
       message: "WEBHOOK_SECRET is required in production environment",
     });
   }
+}).transform((data) => {
+  const resolvedTableId = data.APPWRITE_TABLE_ID || data.APPWRITE_COLLECTION_ID || "articles";
+  return {
+    ...data,
+    APPWRITE_TABLE_ID: resolvedTableId,
+    APPWRITE_COLLECTION_ID: data.APPWRITE_COLLECTION_ID || resolvedTableId,
+  };
 });
 
 /**

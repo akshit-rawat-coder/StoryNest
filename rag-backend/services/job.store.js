@@ -1,29 +1,29 @@
 import { ID, Query } from "node-appwrite";
 
 /**
- * Durable Job Store backed by Appwrite's `sync_jobs` collection.
+ * Durable Job Store backed by Appwrite TablesDB (`sync_jobs` table).
  * Provides safe worker lease acquisition, retry scheduling with exponential backoff,
  * and job lifecycle state tracking.
  */
 export class SyncJobStore {
   /**
    * @param {Object} options
-   * @param {import("node-appwrite").Databases} options.databases
+   * @param {import("node-appwrite").TablesDB} options.tablesDB
    * @param {string} options.databaseId
-   * @param {string} [options.collectionId="sync_jobs"]
+   * @param {string} [options.tableId="6af2a4b5001496679e4c"]
    * @param {string} [options.nodeEnv="development"]
    */
-  constructor({ databases, databaseId, collectionId = "sync_jobs", nodeEnv = "development" }) {
-    if (!databases) throw new Error("SyncJobStore: databases client is required");
+  constructor({ tablesDB, databaseId, tableId = "6af2a4b5001496679e4c", nodeEnv = "development" }) {
+    if (!tablesDB) throw new Error("SyncJobStore: tablesDB client is required");
     if (!databaseId) throw new Error("SyncJobStore: databaseId is required");
 
-    this.databases = databases;
+    this.tablesDB = tablesDB;
     this.databaseId = databaseId;
-    this.collectionId = collectionId;
+    this.tableId = tableId;
     this.nodeEnv = nodeEnv;
     this.isProduction = nodeEnv === "production";
 
-    // In-memory test store used ONLY in test suites when injected
+    // In-memory test store used ONLY in isolated unit/integration test suites when enableTestMode() is called
     this.testStore = new Map();
     this.useTestStore = false;
   }
@@ -36,16 +36,16 @@ export class SyncJobStore {
   }
 
   /**
-   * Persists a new synchronization job.
+   * Persists a new synchronization job row in Appwrite TablesDB.
    *
    * @param {Object} params
-   * @param {string} params.articleId - Target Appwrite article ID
+   * @param {string} params.articleId - Target Appwrite article row ID
    * @param {"upsert"|"delete"} params.action
    * @param {string} [params.event] - Webhook event name
    * @param {string} [params.contentHash] - SHA-256 of article content
-   * @param {string} [params.articleUpdatedAt] - Appwrite document $updatedAt
+   * @param {string} [params.articleUpdatedAt] - Appwrite row $updatedAt
    * @param {number} [params.maxAttempts=3]
-   * @returns {Promise<Object>} Created job record
+   * @returns {Promise<Object>} Created job row
    */
   async createJob({
     articleId,
@@ -60,15 +60,15 @@ export class SyncJobStore {
 
     const now = new Date().toISOString();
     const jobData = {
-      articleId: String(articleId),
-      action: String(action),
+      articleId: String(articleId).slice(0, 255),
+      action: String(action).slice(0, 32),
       status: "pending",
       attempts: 0,
       maxAttempts: Number(maxAttempts) || 3,
-      contentHash: String(contentHash || ""),
-      articleUpdatedAt: String(articleUpdatedAt || ""),
+      contentHash: String(contentHash || "").slice(0, 64),
+      articleUpdatedAt: String(articleUpdatedAt || "").slice(0, 64),
       lastError: "",
-      event: String(event || ""),
+      event: String(event || "").slice(0, 255),
       nextRetryAt: now,
       lockedAt: "",
     };
@@ -81,44 +81,30 @@ export class SyncJobStore {
     }
 
     try {
-      const doc = await this.databases.createDocument(
-        this.databaseId,
-        this.collectionId,
-        ID.unique(),
-        jobData
-      );
-      return doc;
+      const row = await this.tablesDB.createRow({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        rowId: ID.unique(),
+        data: jobData,
+      });
+      return row;
     } catch (err) {
-      const isMissingCollection = err.code === 404 || err.message?.includes("Collection not found");
-      const isScopeIssue = err.code === 401 || err.type === "general_unauthorized_scope";
-
-      if (this.isProduction) {
-        console.error(
-          `[SyncJobStore] CRITICAL: Durable job store '${this.collectionId}' is unavailable in Appwrite. Error: ${err.message}`
-        );
-        throw new Error(
-          `Durable job store '${this.collectionId}' is unavailable in Appwrite. Please ensure the collection is created with proper scopes.`
-        );
-      }
-
-      // Non-production warning
-      console.warn(
-        `[SyncJobStore] Warning: Appwrite '${this.collectionId}' unavailable (${err.message}). Using local fallback for testing.`
+      console.error(
+        `[SyncJobStore] CRITICAL: Failed to create row in TablesDB table '${this.tableId}': ${err.message}`
       );
-      const jobId = "job_" + Math.random().toString(36).substring(2, 11);
-      const fallbackRecord = { $id: jobId, ...jobData, $createdAt: now, $updatedAt: now };
-      this.testStore.set(jobId, fallbackRecord);
-      return fallbackRecord;
+      throw new Error(
+        `Durable job store table '${this.tableId}' failed to persist job: ${err.message}`
+      );
     }
   }
 
   /**
-   * Acquires a lease on a job for worker execution.
+   * Acquires a lease on a job row for worker execution.
    * Prevents concurrent workers from processing the same job.
    *
    * @param {string} jobId
    * @param {number} [leaseDurationMs=60000] - Lease expiration window (default 60s)
-   * @returns {Promise<Object|null>} Leased job document or null if lease could not be acquired
+   * @returns {Promise<Object|null>} Leased job row or null if lease could not be acquired
    */
   async acquireLease(jobId, leaseDurationMs = 60000) {
     if (!jobId) return null;
@@ -146,11 +132,11 @@ export class SyncJobStore {
     }
 
     try {
-      const current = await this.databases.getDocument(
-        this.databaseId,
-        this.collectionId,
-        jobId
-      );
+      const current = await this.tablesDB.getRow({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        rowId: jobId,
+      });
 
       if (current.status === "processing" && current.lockedAt) {
         const lockAge = now.getTime() - new Date(current.lockedAt).getTime();
@@ -159,16 +145,16 @@ export class SyncJobStore {
         }
       }
 
-      const updated = await this.databases.updateDocument(
-        this.databaseId,
-        this.collectionId,
-        jobId,
-        {
+      const updated = await this.tablesDB.updateRow({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        rowId: jobId,
+        data: {
           status: "processing",
           lockedAt,
           attempts: (current.attempts || 0) + 1,
-        }
-      );
+        },
+      });
       return updated;
     } catch (err) {
       console.warn(`[SyncJobStore] Failed to acquire lease on job ${jobId}:`, err.message);
@@ -177,11 +163,11 @@ export class SyncJobStore {
   }
 
   /**
-   * Marks a job as completed.
+   * Marks a job row as completed.
    *
    * @param {string} jobId
    * @param {Object} [details]
-   * @returns {Promise<Object>}
+   * @returns {Promise<Object|null>}
    */
   async markCompleted(jobId, details = {}) {
     const now = new Date().toISOString();
@@ -201,12 +187,12 @@ export class SyncJobStore {
     }
 
     try {
-      return await this.databases.updateDocument(
-        this.databaseId,
-        this.collectionId,
-        jobId,
-        updatePayload
-      );
+      return await this.tablesDB.updateRow({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        rowId: jobId,
+        data: updatePayload,
+      });
     } catch (err) {
       console.error(`[SyncJobStore] Failed to mark job ${jobId} as completed:`, err.message);
       return null;
@@ -214,13 +200,13 @@ export class SyncJobStore {
   }
 
   /**
-   * Marks a job as failed, recording error and scheduling exponential backoff.
+   * Marks a job row as failed, recording error and scheduling exponential backoff.
    *
    * @param {string} jobId
    * @param {Error|string} error
    * @param {Object} [options]
    * @param {number} [options.backoffBaseMs=15000] - Base retry delay (15s)
-   * @returns {Promise<Object>}
+   * @returns {Promise<Object|null>}
    */
   async markFailed(jobId, error, { backoffBaseMs = 15000 } = {}) {
     const errorMsg = String(error?.message || error || "Unknown error").slice(0, 1990);
@@ -247,11 +233,11 @@ export class SyncJobStore {
     }
 
     try {
-      const current = await this.databases.getDocument(
-        this.databaseId,
-        this.collectionId,
-        jobId
-      );
+      const current = await this.tablesDB.getRow({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        rowId: jobId,
+      });
 
       const attempts = current.attempts || 1;
       const maxAttempts = current.maxAttempts || 3;
@@ -260,17 +246,17 @@ export class SyncJobStore {
       const delay = Math.min(300000, backoffBaseMs * Math.pow(2, attempts - 1));
       const nextRetryAt = new Date(now.getTime() + delay).toISOString();
 
-      return await this.databases.updateDocument(
-        this.databaseId,
-        this.collectionId,
-        jobId,
-        {
+      return await this.tablesDB.updateRow({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        rowId: jobId,
+        data: {
           status: isExhausted ? "failed" : "pending",
           lockedAt: "",
           lastError: errorMsg,
           nextRetryAt,
-        }
-      );
+        },
+      });
     } catch (err) {
       console.error(`[SyncJobStore] Failed to update failed status for job ${jobId}:`, err.message);
       return null;
@@ -278,7 +264,7 @@ export class SyncJobStore {
   }
 
   /**
-   * Retrieves jobs that are pending or due for retry.
+   * Retrieves job rows that are pending or have expired worker leases.
    *
    * @param {number} [limit=10]
    * @returns {Promise<Array<Object>>}
@@ -305,12 +291,27 @@ export class SyncJobStore {
     }
 
     try {
-      const response = await this.databases.listDocuments(
-        this.databaseId,
-        this.collectionId,
-        [Query.equal("status", "pending"), Query.limit(limit)]
-      );
-      return response.documents || [];
+      const response = await this.tablesDB.listRows({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        queries: [Query.equal("status", "pending"), Query.limit(limit)],
+      });
+      const pendingRows = response.rows || [];
+
+      if (pendingRows.length < limit) {
+        const processingRes = await this.tablesDB.listRows({
+          databaseId: this.databaseId,
+          tableId: this.tableId,
+          queries: [Query.equal("status", "processing"), Query.limit(limit - pendingRows.length)],
+        });
+        const expiredLeases = (processingRes.rows || []).filter((job) => {
+          if (!job.lockedAt) return false;
+          return now.getTime() - new Date(job.lockedAt).getTime() > 60000;
+        });
+        return [...pendingRows, ...expiredLeases];
+      }
+
+      return pendingRows;
     } catch (err) {
       console.warn(`[SyncJobStore] findDueJobs query failed:`, err.message);
       return [];
@@ -345,13 +346,13 @@ export class SyncJobStore {
     }
 
     try {
-      const res = await this.databases.listDocuments(
-        this.databaseId,
-        this.collectionId,
-        [Query.orderDesc("$createdAt"), Query.limit(20)]
-      );
+      const res = await this.tablesDB.listRows({
+        databaseId: this.databaseId,
+        tableId: this.tableId,
+        queries: [Query.orderDesc("$createdAt"), Query.limit(20)],
+      });
       const metrics = { pending: 0, processing: 0, completed: 0, failed: 0 };
-      const recentJobs = (res.documents || []).map((j) => {
+      const recentJobs = (res.rows || []).map((j) => {
         if (metrics[j.status] !== undefined) metrics[j.status]++;
         return {
           jobId: j.$id,
@@ -374,4 +375,3 @@ export class SyncJobStore {
     }
   }
 }
-
