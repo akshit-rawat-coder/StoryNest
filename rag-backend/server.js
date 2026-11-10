@@ -158,7 +158,7 @@ export function createRequestHandler(options = {}) {
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Webhook-Secret, X-Appwrite-Webhook-Signature, X-Appwrite-Webhook-Event"
+      "Content-Type, Authorization, X-Webhook-Secret, X-Appwrite-Webhook-Signature, X-Appwrite-Webhook-Event, X-Appwrite-Webhook-Events"
     );
     res.setHeader("Access-Control-Max-Age", "86400");
 
@@ -200,17 +200,35 @@ export function createRequestHandler(options = {}) {
         : normalized.startsWith("/api")
           ? normalized
           : `/api${normalized}`;
+    const routePath = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
     const querySecret = url.searchParams.get("secret") || "";
+
+    // Reconstruct true public external URL for HMAC-SHA1 verification (stripping Vercel's internal ?path= rewrite query)
+    const proto = String(req.headers["x-forwarded-proto"] || "https")
+      .split(",")[0]
+      .trim();
+    const effectiveHost = String(req.headers["x-forwarded-host"] || host || "127.0.0.1")
+      .split(",")[0]
+      .trim();
+    const cleanParams = new URLSearchParams(url.searchParams);
+    cleanParams.delete("path");
+    const cleanQueryString = cleanParams.toString();
+    const fullUrl = `${proto}://${effectiveHost}${pathname}${cleanQueryString ? `?${cleanQueryString}` : ""}`;
+
+    // Safe URL for diagnostic logging (never expose ?secret= value)
+    const logParams = new URLSearchParams(cleanParams);
+    if (logParams.has("secret")) logParams.set("secret", "[REDACTED]");
+    const safeFullUrl = `${proto}://${effectiveHost}${pathname}${logParams.toString() ? `?${logParams.toString()}` : ""}`;
 
     const clientIp =
       req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
       req.socket?.remoteAddress ||
       "127.0.0.1";
 
-    // Helper to read raw body and parsed JSON (supports pre-parsed Vercel req.body AND stream)
+    // Helper to read raw body and parsed JSON (supports pre-parsed req.body in tests AND raw Node HTTP stream)
     const readRequestBody = () =>
       new Promise((resolve, reject) => {
-        // Handle pre-parsed body from Vercel / serverless middleware
+        // Handle pre-parsed body (unit tests or middleware with rawBody)
         if (req.body !== undefined && req.body !== null) {
           if (typeof req.body === "string") {
             let parsed = {};
@@ -226,13 +244,18 @@ export function createRequestHandler(options = {}) {
             return resolve({ parsed, rawBody: req.body });
           }
           if (typeof req.body === "object") {
+            if (typeof req.rawBody !== "string" && env.NODE_ENV === "production") {
+              console.warn(
+                "[RagServer] Warning: req.body was pre-parsed without req.rawBody; HMAC signature verification may fail if formatting differs."
+              );
+            }
             const rawBody =
               typeof req.rawBody === "string" ? req.rawBody : JSON.stringify(req.body);
             return resolve({ parsed: req.body, rawBody });
           }
         }
 
-        // Stream reading for native Node http server
+        // Stream reading for native Node HTTP / Vercel raw body stream
         const contentLength = parseInt(req.headers["content-length"] || "0", 10);
         if (contentLength > MAX_BODY_BYTES) {
           const err = new Error("Payload Too Large");
@@ -240,21 +263,23 @@ export function createRequestHandler(options = {}) {
           return reject(err);
         }
 
-        let rawBody = "";
+        const chunks = [];
         let bytesReceived = 0;
 
         req.on("data", (chunk) => {
-          bytesReceived += chunk.length;
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          bytesReceived += buf.length;
           if (bytesReceived > MAX_BODY_BYTES) {
             const err = new Error("Payload Too Large");
             err.status = 413;
             req.destroy();
             return reject(err);
           }
-          rawBody += chunk.toString("utf8");
+          chunks.push(buf);
         });
 
         req.on("end", () => {
+          const rawBody = Buffer.concat(chunks).toString("utf8");
           let parsed = {};
           if (rawBody.trim()) {
             try {
@@ -277,7 +302,7 @@ export function createRequestHandler(options = {}) {
     };
 
     // 2. Health Endpoint
-    if (req.method === "GET" && pathname === "/api/health") {
+    if (req.method === "GET" && routePath === "/api/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -292,7 +317,7 @@ export function createRequestHandler(options = {}) {
     }
 
     // 3. POST /api/ask Endpoint
-    if (req.method === "POST" && pathname === "/api/ask") {
+    if (req.method === "POST" && routePath === "/api/ask") {
       if (!rateLimiter.isAllowed(clientIp)) {
         res.writeHead(429, { "Content-Type": "application/json" });
         res.end(
@@ -336,10 +361,7 @@ export function createRequestHandler(options = {}) {
     }
 
     // 4. POST /api/webhooks/appwrite Endpoint
-    if (req.method === "POST" && pathname === "/api/webhooks/appwrite") {
-      const proto = req.headers["x-forwarded-proto"] || "https";
-      const fullUrl = `${proto}://${host}${url.pathname}${url.search}`;
-
+    if (req.method === "POST" && routePath === "/api/webhooks/appwrite") {
       let body;
       let rawBody;
       try {
@@ -347,10 +369,40 @@ export function createRequestHandler(options = {}) {
         body = result.parsed;
         rawBody = result.rawBody;
       } catch (err) {
+        console.warn(
+          "[Webhook] Failed to read/parse request body:",
+          JSON.stringify({ verificationUrl: safeFullUrl, error: err.message })
+        );
         res.writeHead(err.status || 400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err.message || "Invalid request body" }));
         return;
       }
+
+      const rawEventsHeader =
+        req.headers["x-appwrite-webhook-events"] ||
+        req.headers["x-appwrite-webhook-event"] ||
+        body?.events ||
+        body?.event ||
+        "";
+
+      const hasAppwriteSig = Boolean(req.headers["x-appwrite-webhook-signature"]);
+      const hasWebhookSecretHeader = Boolean(req.headers["x-webhook-secret"]);
+      const hasAuthHeader = Boolean(req.headers["authorization"]);
+
+      console.info(
+        "[Webhook] Received request",
+        JSON.stringify({
+          routePath,
+          verificationUrl: safeFullUrl,
+          rawBodyBytes: Buffer.byteLength(rawBody, "utf8"),
+          bodyPreParsed: req.body !== undefined && req.body !== null,
+          hasAppwriteSignature: hasAppwriteSig,
+          hasWebhookSecretHeader,
+          hasAuthHeader,
+          hasQuerySecret: Boolean(querySecret),
+          rawEventsHeader: rawEventsHeader ? String(rawEventsHeader).slice(0, 255) : null,
+        })
+      );
 
       const isAuthValid = syncService.verifyWebhookAuth({
         headers: req.headers,
@@ -360,6 +412,17 @@ export function createRequestHandler(options = {}) {
       });
 
       if (!isAuthValid) {
+        console.warn(
+          "[Webhook] Authentication failed",
+          JSON.stringify({
+            verificationUrl: safeFullUrl,
+            rawBodyBytes: Buffer.byteLength(rawBody, "utf8"),
+            hasAppwriteSignature: hasAppwriteSig,
+            hasWebhookSecretHeader,
+            hasAuthHeader,
+            hasQuerySecret: Boolean(querySecret),
+          })
+        );
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid webhook signature or secret" }));
         return;
@@ -369,16 +432,46 @@ export function createRequestHandler(options = {}) {
         const payload = body.payload || body;
         const defaultTableId = env.APPWRITE_TABLE_ID || env.APPWRITE_COLLECTION_ID || "articles";
         const defaultRowId = payload?.$id || payload?.rowId || "*";
-        const event =
-          req.headers["x-appwrite-webhook-event"] ||
-          body.event ||
+        const eventInput =
+          rawEventsHeader ||
           `databases.${env.APPWRITE_DATABASE_ID}.tables.${defaultTableId}.rows.${defaultRowId}.update`;
+        const event =
+          typeof syncService.resolveWebhookEvent === "function"
+            ? syncService.resolveWebhookEvent(eventInput)
+            : String(eventInput);
+
+        console.info(
+          "[Webhook] Authenticated request dispatching event",
+          JSON.stringify({
+            event,
+            articleId: payload?.$id || payload?.rowId || null,
+            tableId: payload?.$tableId || null,
+          })
+        );
 
         const result = await syncService.handleWebhookEvent({ event, payload });
+        console.info(
+          "[Webhook] Processing result",
+          JSON.stringify({
+            event,
+            articleId: payload?.$id || payload?.rowId || null,
+            action: result?.action || null,
+            jobId: result?.jobId || null,
+            reason: result?.reason || null,
+          })
+        );
+
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ success: true, result }));
       } catch (err) {
-        console.error("RagServer :: error in webhook processing:", err.message);
+        console.error(
+          "RagServer :: error in webhook processing:",
+          JSON.stringify({
+            verificationUrl: safeFullUrl,
+            error: err.message,
+            code: err.code || null,
+          })
+        );
         res.writeHead(err.status || 500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err.message || "Webhook processing failed" }));
       }
@@ -386,10 +479,7 @@ export function createRequestHandler(options = {}) {
     }
 
     // 5. POST /api/articles/sync-single Endpoint
-    if (req.method === "POST" && pathname === "/api/articles/sync-single") {
-      const proto = req.headers["x-forwarded-proto"] || "https";
-      const fullUrl = `${proto}://${host}${url.pathname}${url.search}`;
-
+    if (req.method === "POST" && routePath === "/api/articles/sync-single") {
       let body;
       let rawBody;
       try {
@@ -435,7 +525,7 @@ export function createRequestHandler(options = {}) {
     }
 
     // 6. POST / GET /api/jobs/worker (Worker sweep for pending & retry-due jobs)
-    if ((req.method === "POST" || req.method === "GET") && pathname === "/api/jobs/worker") {
+    if ((req.method === "POST" || req.method === "GET") && routePath === "/api/jobs/worker") {
       const isAuthValid =
         typeof syncService.verifyWorkerAuth === "function"
           ? syncService.verifyWorkerAuth({ headers: req.headers, querySecret })
@@ -470,7 +560,7 @@ export function createRequestHandler(options = {}) {
     }
 
     // 7. GET /api/jobs/status (Operational telemetry & job tracking without exposing secrets)
-    if (req.method === "GET" && pathname === "/api/jobs/status") {
+    if (req.method === "GET" && routePath === "/api/jobs/status") {
       try {
         const stats = syncService.jobStore
           ? await syncService.jobStore.getJobStats()
@@ -486,9 +576,7 @@ export function createRequestHandler(options = {}) {
     }
 
     // 8. POST /api/sync/reconcile (Reconciles Appwrite with Qdrant)
-    if (req.method === "POST" && pathname === "/api/sync/reconcile") {
-      const proto = req.headers["x-forwarded-proto"] || "https";
-      const fullUrl = `${proto}://${host}${url.pathname}${url.search}`;
+    if (req.method === "POST" && routePath === "/api/sync/reconcile") {
 
       let body = {};
       let rawBody = "";

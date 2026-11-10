@@ -81,16 +81,45 @@ export class SyncJobStore {
     }
 
     try {
+      console.info(
+        "[SyncJobStore] Creating job row",
+        JSON.stringify({
+          databaseId: this.databaseId,
+          tableId: this.tableId,
+          articleId: jobData.articleId,
+          action: jobData.action,
+          event: jobData.event,
+        })
+      );
+
       const row = await this.tablesDB.createRow({
         databaseId: this.databaseId,
         tableId: this.tableId,
         rowId: ID.unique(),
         data: jobData,
       });
+
+      console.info(
+        "[SyncJobStore] Job row created",
+        JSON.stringify({
+          jobId: row?.$id,
+          tableId: this.tableId,
+          articleId: jobData.articleId,
+          action: jobData.action,
+        })
+      );
       return row;
     } catch (err) {
       console.error(
-        `[SyncJobStore] CRITICAL: Failed to create row in TablesDB table '${this.tableId}': ${err.message}`
+        `[SyncJobStore] CRITICAL: Failed to create row in TablesDB table '${this.tableId}':`,
+        JSON.stringify({
+          databaseId: this.databaseId,
+          tableId: this.tableId,
+          articleId: jobData.articleId,
+          code: err?.code,
+          type: err?.type,
+          message: err?.message,
+        })
       );
       throw new Error(
         `Durable job store table '${this.tableId}' failed to persist job: ${err.message}`

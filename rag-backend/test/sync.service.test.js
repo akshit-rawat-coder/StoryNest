@@ -299,6 +299,28 @@ describe("SyncService Unit Tests", () => {
     ]);
   });
 
+  test("resolveWebhookEvent extracts matching articles event from comma-separated X-Appwrite-Webhook-Events", () => {
+    const service = new SyncService({
+      processor: { processArticle: async () => {}, deleteArticle: async () => {} },
+      env: mockEnv,
+      tablesDB: {},
+    });
+
+    const commaEvents =
+      "databases.*.tables.*.rows.*.create, databases.6a53b1a4002566268803.tables.articles.rows.row_123.create, databases.6a53b1a4002566268803.tables.articles.rows.*.create";
+    assert.equal(
+      service.resolveWebhookEvent(commaEvents),
+      "databases.6a53b1a4002566268803.tables.articles.rows.row_123.create"
+    );
+
+    const syncJobsComma =
+      "databases.*.tables.*.rows.*.create, databases.6a53b1a4002566268803.tables.6af2a4b5001496679e4c.rows.j_1.create";
+    assert.equal(
+      service.resolveWebhookEvent(syncJobsComma),
+      "databases.6a53b1a4002566268803.tables.6af2a4b5001496679e4c.rows.j_1.create"
+    );
+  });
+
   test("handleWebhookEvent rejects valid article event payload without $id", async () => {
     const service = new SyncService({
       processor: { processArticle: async () => {}, deleteArticle: async () => {} },

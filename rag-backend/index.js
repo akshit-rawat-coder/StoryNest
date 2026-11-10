@@ -17,6 +17,13 @@ export { RagQueryService, QuestionInputSchema } from "./services/rag.service.js"
 export { SyncService } from "./services/sync.service.js";
 export { createServer, createRequestHandler } from "./server.js";
 
+// Disable automatic JSON body parsing so raw HTTP body bytes are preserved for HMAC signature verification
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 // Cached serverless handler across warm invocations
 let cachedHandler = null;
 

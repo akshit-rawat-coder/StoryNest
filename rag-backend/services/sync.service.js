@@ -208,6 +208,35 @@ export class SyncService {
   }
 
   /**
+   * Resolves the authoritative Appwrite event name from a comma-separated
+   * X-Appwrite-Webhook-Events header, single event string, or array.
+   *
+   * @param {string|string[]} rawEvents
+   * @returns {string}
+   */
+  resolveWebhookEvent(rawEvents = "") {
+    if (!rawEvents) return "";
+    const candidates = Array.isArray(rawEvents)
+      ? rawEvents.map((e) => String(e).trim()).filter(Boolean)
+      : String(rawEvents)
+          .split(",")
+          .map((e) => e.trim())
+          .filter(Boolean);
+
+    if (candidates.length === 0) return "";
+
+    // If any entry explicitly comes from sync_jobs, return it so validation ignores it
+    const syncJobsCandidate = candidates.find(
+      (evt) => this.validateWebhookEvent(evt).reason === "ignored_sync_jobs_event"
+    );
+    if (syncJobsCandidate) return syncJobsCandidate;
+
+    // Pick the first candidate matching our configured database and articles table
+    const validCandidate = candidates.find((evt) => this.validateWebhookEvent(evt).valid);
+    return validCandidate || candidates[0];
+  }
+
+  /**
    * Validates whether an incoming Appwrite webhook event targets the configured
    * database and articles table. Explicitly ignores sync_jobs and other tables.
    *
@@ -279,12 +308,20 @@ export class SyncService {
    * @returns {Promise<Object>}
    */
   async handleWebhookEvent({ event = "", payload = {} }) {
-    const validation = this.validateWebhookEvent(event);
+    const resolvedEvent = this.resolveWebhookEvent(event);
+    const validation = this.validateWebhookEvent(resolvedEvent);
     if (!validation.valid) {
+      console.info(
+        "[SyncService] Webhook event ignored",
+        JSON.stringify({
+          event: resolvedEvent,
+          reason: validation.reason,
+        })
+      );
       return {
         action: "ignored",
         reason: validation.reason,
-        event,
+        event: resolvedEvent,
       };
     }
 
@@ -294,7 +331,7 @@ export class SyncService {
     }
 
     const articleId = String(rowId);
-    const isDelete = event.endsWith(".delete") || event.includes(".delete.");
+    const isDelete = resolvedEvent.endsWith(".delete") || resolvedEvent.includes(".delete.");
     const articleUpdatedAt = payload.$updatedAt || payload.$createdAt || new Date().toISOString();
 
     // Determine target action:
@@ -309,6 +346,16 @@ export class SyncService {
       action = "delete";
     }
 
+    console.info(
+      "[SyncService] Handling validated webhook event",
+      JSON.stringify({
+        event: resolvedEvent,
+        articleId,
+        action,
+        status: payload.status ?? null,
+      })
+    );
+
     const contentHash = action === "upsert" ? this.computeContentHash(payload) : "";
 
     // 1. Check idempotency: if Qdrant already contains indexed chunks with the exact same contentHash,
@@ -321,6 +368,10 @@ export class SyncService {
         existingMeta.articleUpdatedAt &&
         new Date(existingMeta.articleUpdatedAt).getTime() >= new Date(articleUpdatedAt).getTime()
       ) {
+        console.info(
+          "[SyncService] Webhook skipped (identical version already indexed)",
+          JSON.stringify({ articleId, contentHash })
+        );
         return {
           action: "skipped",
           reason: "already_indexed_identical_version",
@@ -336,10 +387,12 @@ export class SyncService {
       job = await this.jobStore.createJob({
         articleId,
         action,
-        event,
+        event: resolvedEvent,
         contentHash,
         articleUpdatedAt,
       });
+    } else {
+      console.warn("[SyncService] No jobStore configured; executing sync without durable job record.");
     }
 
     // 3. Process job inline (Vercel Serverless execution lifecycle)
