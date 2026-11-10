@@ -281,23 +281,30 @@ describe("HTTP Server Endpoint Tests", () => {
     const port = server.address().port;
 
     const fullUrl = `https://127.0.0.1:${port}/api/webhooks/appwrite`;
-    const payloadBody = JSON.stringify({ $id: "doc_sig_1", title: "Valid Signature" });
+    // Raw body with non-compact whitespace to ensure raw body is NOT re-serialized before HMAC check
+    const payloadBody = '{ "$id": "doc_sig_1",   "title": "Valid Signature" }';
     const validSignature = crypto
       .createHmac("sha1", "correct_secret")
       .update(fullUrl + payloadBody)
       .digest("base64");
 
-    // 1. Valid signature -> 200
+    // 1. Valid signature with exact Appwrite Console event -> 200
     const resValid = await fetch(`http://127.0.0.1:${port}/api/webhooks/appwrite`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Appwrite-Webhook-Signature": validSignature,
+        "X-Appwrite-Webhook-Event": "databases.6a53b1a4002566268803.tables.articles.rows.*.update",
         "X-Forwarded-Proto": "https",
       },
       body: payloadBody,
     });
     assert.equal(resValid.status, 200);
+    const validData = await resValid.json();
+    assert.equal(
+      validData.result.eventHandled,
+      "databases.6a53b1a4002566268803.tables.articles.rows.*.update"
+    );
 
     // 2. Tampered body with original signature -> 401
     const resTampered = await fetch(`http://127.0.0.1:${port}/api/webhooks/appwrite`, {

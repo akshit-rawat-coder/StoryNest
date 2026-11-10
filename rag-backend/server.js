@@ -372,7 +372,7 @@ export function createRequestHandler(options = {}) {
         const event =
           req.headers["x-appwrite-webhook-event"] ||
           body.event ||
-          `tablesdb.${env.APPWRITE_DATABASE_ID}.tables.${defaultTableId}.rows.${defaultRowId}.update`;
+          `databases.${env.APPWRITE_DATABASE_ID}.tables.${defaultTableId}.rows.${defaultRowId}.update`;
 
         const result = await syncService.handleWebhookEvent({ event, payload });
         res.writeHead(200, { "Content-Type": "application/json" });

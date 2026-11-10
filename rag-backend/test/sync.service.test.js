@@ -218,6 +218,85 @@ describe("SyncService Unit Tests", () => {
     });
     assert.equal(resOtherDb.action, "ignored");
     assert.equal(resOtherDb.reason, "database_mismatch");
+
+    // 5. Console-style databases.*.tables.sync_jobs.* ignored
+    const resConsoleSyncJobs = await service.handleWebhookEvent({
+      event: "databases.6a53b1a4002566268803.tables.sync_jobs.rows.*.create",
+      payload: { $id: "job_console_1" },
+    });
+    assert.equal(resConsoleSyncJobs.action, "ignored");
+    assert.equal(resConsoleSyncJobs.reason, "ignored_sync_jobs_event");
+
+    // 6. Console-style databases.*.tables.6af2a4b5001496679e4c.* ignored
+    const resConsoleSyncJobsId = await service.handleWebhookEvent({
+      event: "databases.6a53b1a4002566268803.tables.6af2a4b5001496679e4c.rows.*.update",
+      payload: { $id: "job_console_2" },
+    });
+    assert.equal(resConsoleSyncJobsId.action, "ignored");
+    assert.equal(resConsoleSyncJobsId.reason, "ignored_sync_jobs_event");
+
+    // 7. Console-style wrong DB & unrelated table ignored
+    const resConsoleWrongDb = await service.handleWebhookEvent({
+      event: "databases.wrong_db.tables.articles.rows.*.create",
+      payload: { $id: "art_2" },
+    });
+    assert.equal(resConsoleWrongDb.action, "ignored");
+    assert.equal(resConsoleWrongDb.reason, "database_mismatch");
+
+    const resConsoleUnrelatedTable = await service.handleWebhookEvent({
+      event: "databases.6a53b1a4002566268803.tables.unrelated.rows.*.create",
+      payload: { $id: "u_1" },
+    });
+    assert.equal(resConsoleUnrelatedTable.action, "ignored");
+    assert.equal(resConsoleUnrelatedTable.reason, "non_articles_table");
+    assert.equal(called, false);
+  });
+
+  test("handleWebhookEvent supports exact Appwrite Console event strings for create, update, and delete", async () => {
+    const actions = [];
+    const mockProcessor = {
+      processArticle: async (doc) => {
+        actions.push({ type: "upsert", id: doc.$id });
+        return { action: "indexed", chunksCount: 1 };
+      },
+      deleteArticle: async (id) => {
+        actions.push({ type: "delete", id });
+        return { deleted: true };
+      },
+    };
+
+    const service = new SyncService({
+      processor: mockProcessor,
+      env: mockEnv,
+      tablesDB: {},
+    });
+
+    // Exact create event string from Appwrite Console
+    const resCreate = await service.handleWebhookEvent({
+      event: "databases.6a53b1a4002566268803.tables.articles.rows.*.create",
+      payload: { $id: "art_console_1", title: "Created Article", status: "active" },
+    });
+    assert.equal(resCreate.action, "indexed");
+
+    // Exact update event string from Appwrite Console
+    const resUpdate = await service.handleWebhookEvent({
+      event: "databases.6a53b1a4002566268803.tables.articles.rows.*.update",
+      payload: { $id: "art_console_1", title: "Updated Article", status: "active" },
+    });
+    assert.equal(resUpdate.action, "indexed");
+
+    // Exact delete event string from Appwrite Console
+    const resDelete = await service.handleWebhookEvent({
+      event: "databases.6a53b1a4002566268803.tables.articles.rows.*.delete",
+      payload: { $id: "art_console_1" },
+    });
+    assert.equal(resDelete.deleted, true);
+
+    assert.deepEqual(actions, [
+      { type: "upsert", id: "art_console_1" },
+      { type: "upsert", id: "art_console_1" },
+      { type: "delete", id: "art_console_1" },
+    ]);
   });
 
   test("handleWebhookEvent rejects valid article event payload without $id", async () => {

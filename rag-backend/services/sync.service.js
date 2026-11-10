@@ -235,9 +235,11 @@ export class SyncService {
       return { valid: false, reason: "ignored_sync_jobs_event" };
     }
 
-    // Match TablesDB format: tablesdb.<dbId>.tables.<tableId>.rows.<rowId>.<action>
+    // Match Appwrite TablesDB event formats:
+    // - databases.<dbId>.tables.<tableId>.rows.<rowId>.<action> (Appwrite Console generated format)
+    // - tablesdb.<dbId>.tables.<tableId>.rows.<rowId>.<action>
     const tablesMatch = event.match(
-      /^tablesdb\.([^.]+)\.tables\.([^.]+)\.rows\.([^.]+)\.(create|update|delete)$/
+      /^(?:databases|tablesdb)\.([^.]+)\.tables\.([^.]+)\.rows\.([^.]+)\.(create|update|delete)$/
     );
     if (tablesMatch) {
       const [, eventDbId, eventTableId] = tablesMatch;
