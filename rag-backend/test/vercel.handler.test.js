@@ -27,6 +27,14 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
     verifyWebhookAuth: (headers = {}) => headers["x-webhook-secret"] === "secret_123",
     handleWebhookEvent: async ({ payload }) => ({ indexed: payload.$id }),
     syncSingleArticle: async (id, action) => ({ synced: id, action }),
+    drainQueue: async () => ({ processed: 2, successes: 2, failures: 0 }),
+    reconcile: async () => ({ activeDocs: 5, missingIndexed: 1 }),
+    jobStore: {
+      getJobStats: async () => ({
+        metrics: { pending: 0, processing: 0, completed: 5, failed: 0 },
+        recentJobs: [],
+      }),
+    },
   };
 
   const mockEnv = {
@@ -266,6 +274,79 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
       resRejected.headers["access-control-allow-origin"],
       "http://localhost:5173"
     );
+  });
+
+  test("handles GET /api/jobs/worker when authenticated or via Vercel Cron", async () => {
+    const handler = createRequestHandler({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+
+    const req = {
+      method: "GET",
+      url: "/api/jobs/worker",
+      headers: {
+        host: "storynest-rag.vercel.app",
+        "x-vercel-cron": "1",
+      },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    const json = JSON.parse(res.body);
+    assert.equal(json.success, true);
+    assert.equal(json.processed, 2);
+  });
+
+  test("handles GET /api/jobs/status returning job metrics safely", async () => {
+    const handler = createRequestHandler({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+
+    const req = {
+      method: "GET",
+      url: "/api/jobs/status",
+      headers: { host: "storynest-rag.vercel.app" },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    const json = JSON.parse(res.body);
+    assert.equal(json.status, "ok");
+    assert.equal(json.metrics.completed, 5);
+  });
+
+  test("handles POST /api/sync/reconcile with webhook authentication", async () => {
+    const handler = createRequestHandler({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+
+    const req = {
+      method: "POST",
+      url: "/api/sync/reconcile",
+      headers: {
+        host: "storynest-rag.vercel.app",
+        "x-webhook-secret": "secret_123",
+      },
+      body: { dryRun: false },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    const json = JSON.parse(res.body);
+    assert.equal(json.success, true);
+    assert.equal(json.missingIndexed, 1);
   });
 });
 

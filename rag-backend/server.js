@@ -1,4 +1,5 @@
 import http from "node:http";
+import { Client, Databases } from "node-appwrite";
 import { getEnv } from "./config/env.js";
 import { createEmbeddingProvider } from "./providers/index.js";
 import { createQdrantClient } from "./vector/qdrant.client.js";
@@ -7,6 +8,7 @@ import { OpenRouterChatService } from "./services/chat.service.js";
 import { RagQueryService } from "./services/rag.service.js";
 import { ArticleProcessor } from "./pipeline/article.processor.js";
 import { SyncService } from "./services/sync.service.js";
+import { SyncJobStore } from "./services/job.store.js";
 
 /**
  * In-memory sliding-window rate limiter per client IP.
@@ -98,9 +100,26 @@ export function createRequestHandler(options = {}) {
         vectorStore,
       });
 
+      const appwriteClient = new Client();
+      appwriteClient
+        .setEndpoint(env.APPWRITE_ENDPOINT)
+        .setProject(env.APPWRITE_PROJECT_ID)
+        .setKey(env.APPWRITE_API_KEY);
+      const databases = new Databases(appwriteClient);
+
+      const jobStore =
+        options.jobStore ||
+        new SyncJobStore({
+          databases,
+          databaseId: env.APPWRITE_DATABASE_ID,
+          nodeEnv: env.NODE_ENV,
+        });
+
       syncService = new SyncService({
         processor: articleProcessor,
         env,
+        jobStore,
+        databases,
       });
     }
   }
@@ -307,7 +326,8 @@ export function createRequestHandler(options = {}) {
 
     // 4. POST /api/webhooks/appwrite Endpoint
     if (req.method === "POST" && pathname === "/api/webhooks/appwrite") {
-      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret);
+      const fullUrl = `https://${host}${url.pathname}${url.search}`;
+      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
       if (!isAuthValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid webhook signature or secret" }));
@@ -335,7 +355,8 @@ export function createRequestHandler(options = {}) {
 
     // 5. POST /api/articles/sync-single Endpoint
     if (req.method === "POST" && pathname === "/api/articles/sync-single") {
-      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret);
+      const fullUrl = `https://${host}${url.pathname}${url.search}`;
+      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
       if (!isAuthValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid authorization" }));
@@ -358,6 +379,71 @@ export function createRequestHandler(options = {}) {
         console.error("RagServer :: error in single article sync:", err.message);
         res.writeHead(err.status || 500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err.message || "Article synchronization failed" }));
+      }
+      return;
+    }
+
+    // 6. POST / GET /api/jobs/worker (Worker sweep for pending & retry-due jobs)
+    if ((req.method === "POST" || req.method === "GET") && pathname === "/api/jobs/worker") {
+      const fullUrl = `https://${host}${url.pathname}${url.search}`;
+      // Vercel Cron automatically sends header 'x-vercel-cron': '1' or authorization
+      const isCron = req.headers["x-vercel-cron"] === "1";
+      const isAuthValid = isCron || syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
+
+      if (!isAuthValid) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid authorization" }));
+        return;
+      }
+
+      try {
+        const sweepStats = await syncService.drainQueue(10);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, ...sweepStats }));
+      } catch (err) {
+        console.error("RagServer :: error in worker queue sweep:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Queue sweep failed" }));
+      }
+      return;
+    }
+
+    // 7. GET /api/jobs/status (Operational telemetry & job tracking without exposing secrets)
+    if (req.method === "GET" && pathname === "/api/jobs/status") {
+      try {
+        const stats = syncService.jobStore
+          ? await syncService.jobStore.getJobStats()
+          : { metrics: {}, recentJobs: [] };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", ...stats }));
+      } catch (err) {
+        console.error("RagServer :: error getting job stats:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Failed to retrieve job status" }));
+      }
+      return;
+    }
+
+    // 8. POST /api/sync/reconcile (Reconciles Appwrite with Qdrant)
+    if (req.method === "POST" && pathname === "/api/sync/reconcile") {
+      const fullUrl = `https://${host}${url.pathname}${url.search}`;
+      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
+      if (!isAuthValid) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid authorization" }));
+        return;
+      }
+
+      try {
+        const body = await readJsonBody().catch(() => ({}));
+        const dryRun = Boolean(body?.dryRun);
+        const reconcileStats = await syncService.reconcile({ dryRun });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, ...reconcileStats }));
+      } catch (err) {
+        console.error("RagServer :: error in reconciliation:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Reconciliation failed" }));
       }
       return;
     }

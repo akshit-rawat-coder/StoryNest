@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { cleanHtml } from "./html.cleaner.js";
 import { chunkArticle } from "./chunker.js";
 import { generatePointId } from "../vector/vector.store.js";
@@ -109,6 +110,16 @@ export class ArticleProcessor {
       : (typeof article.tags === "string"
           ? article.tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
           : []);
+    const tagsStr = tagsArray.join(",");
+
+    // Compute deterministic content hash for idempotency checking
+    const contentHash = crypto
+      .createHash("sha256")
+      .update(
+        `${article.title || ""}:${article.status || ""}:${article.category || ""}:${tagsStr}:${cleanText}`
+      )
+      .digest("hex");
+    const articleUpdatedAt = article.$updatedAt || article.$createdAt || new Date().toISOString();
 
     // Build Qdrant points
     const points = chunks.map((chunk, idx) => ({
@@ -125,6 +136,8 @@ export class ArticleProcessor {
         chunkIndex: chunk.chunkIndex,
         totalChunks: chunk.totalChunks,
         chunkText: chunk.chunkText,
+        contentHash,
+        articleUpdatedAt,
         createdAt: article.$createdAt || new Date().toISOString(),
       },
     }));
@@ -138,6 +151,8 @@ export class ArticleProcessor {
       articleId,
       chunksCount: points.length,
       vectorsCount: points.length,
+      contentHash,
+      articleUpdatedAt,
       title: article.title,
       qdrantResult: upsertRes,
     };

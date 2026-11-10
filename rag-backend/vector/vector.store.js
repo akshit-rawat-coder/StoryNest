@@ -158,6 +158,29 @@ export class VectorStore {
       payload: hit.payload,
     }));
   }
+
+  /**
+   * Retrieves stored metadata for an indexed article (e.g. contentHash, articleUpdatedAt).
+   *
+   * @param {string} articleId
+   * @returns {Promise<Object|null>} First matching chunk payload or null
+   */
+  async getArticleMetadata(articleId) {
+    if (!articleId) return null;
+    try {
+      const res = await this.client.scroll(this.collectionName, {
+        filter: {
+          must: [{ key: "articleId", match: { value: articleId } }],
+        },
+        limit: 1,
+        with_payload: true,
+        with_vector: false,
+      });
+      return res.points?.[0]?.payload || null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 export default VectorStore;
