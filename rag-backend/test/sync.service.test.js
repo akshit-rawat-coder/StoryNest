@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { SyncService } from "../services/sync.service.js";
 
 describe("SyncService Unit Tests", () => {
@@ -12,21 +13,109 @@ describe("SyncService Unit Tests", () => {
     APPWRITE_API_KEY: "test_key",
   };
 
-  test("verifyWebhookAuth validates header and query parameter secrets", () => {
+  test("verifyWebhookAuth validates HMAC-SHA1 signature and custom secret headers", () => {
     const service = new SyncService({
       processor: { processArticle: async () => {}, deleteArticle: async () => {} },
       env: mockEnv,
       databases: {},
     });
 
+    const url = "https://storynest.example.com/api/webhooks/appwrite";
+    const rawBody = JSON.stringify({ event: "create", payload: { $id: "doc_1" } });
+
+    // 1. Valid HMAC-SHA1 signature (Base64)
+    const validSignature = crypto
+      .createHmac("sha1", "test_secret_123")
+      .update(url + rawBody)
+      .digest("base64");
+
+    assert.equal(
+      service.verifyWebhookAuth({
+        headers: { "x-appwrite-webhook-signature": validSignature },
+        requestUrl: url,
+        rawBody,
+      }),
+      true
+    );
+
+    // 2. Modified body produces signature mismatch
+    assert.equal(
+      service.verifyWebhookAuth({
+        headers: { "x-appwrite-webhook-signature": validSignature },
+        requestUrl: url,
+        rawBody: JSON.stringify({ event: "create", payload: { $id: "doc_TAMPERED" } }),
+      }),
+      false
+    );
+
+    // 3. Invalid signature
+    assert.equal(
+      service.verifyWebhookAuth({
+        headers: { "x-appwrite-webhook-signature": "invalid_base64_sig" },
+        requestUrl: url,
+        rawBody,
+      }),
+      false
+    );
+
+    // 4. Direct equality attempt (signature header equals secret plain text) MUST fail
+    assert.equal(
+      service.verifyWebhookAuth({
+        headers: { "x-appwrite-webhook-signature": "test_secret_123" },
+        requestUrl: url,
+        rawBody,
+      }),
+      false
+    );
+
+    // 5. Custom header fallback
     assert.equal(service.verifyWebhookAuth({ "x-webhook-secret": "test_secret_123" }), true);
-    assert.equal(service.verifyWebhookAuth({ "x-appwrite-webhook-signature": "test_secret_123" }), true);
     assert.equal(service.verifyWebhookAuth({ authorization: "Bearer test_secret_123" }), true);
     assert.equal(service.verifyWebhookAuth({}, "test_secret_123"), true);
 
-    // Invalid
+    // 6. Invalid secret or missing signature
     assert.equal(service.verifyWebhookAuth({ "x-webhook-secret": "wrong" }), false);
     assert.equal(service.verifyWebhookAuth({}), false);
+  });
+
+  test("verifyWorkerAuth protects worker sweep and rejects x-vercel-cron alone", () => {
+    const service = new SyncService({
+      processor: { processArticle: async () => {}, deleteArticle: async () => {} },
+      env: { ...mockEnv, CRON_SECRET: "cron_secret_789" },
+      databases: {},
+    });
+
+    // Valid authorization header
+    assert.equal(
+      service.verifyWorkerAuth({
+        headers: { authorization: "Bearer cron_secret_789" },
+      }),
+      true
+    );
+
+    // Valid dedicated X-Cron-Secret header
+    assert.equal(
+      service.verifyWorkerAuth({
+        headers: { "x-cron-secret": "cron_secret_789" },
+      }),
+      true
+    );
+
+    // X-Vercel-Cron: 1 alone without secret is unauthorized
+    assert.equal(
+      service.verifyWorkerAuth({
+        headers: { "x-vercel-cron": "1" },
+      }),
+      false
+    );
+
+    // Wrong secret is rejected
+    assert.equal(
+      service.verifyWorkerAuth({
+        headers: { authorization: "Bearer wrong_secret" },
+      }),
+      false
+    );
   });
 
   test("handleWebhookEvent handles delete event", async () => {

@@ -24,7 +24,16 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
   };
 
   const mockSyncService = {
-    verifyWebhookAuth: (headers = {}) => headers["x-webhook-secret"] === "secret_123",
+    verifyWebhookAuth: (firstArg = {}) => {
+      const headers = firstArg.headers || firstArg;
+      return headers["x-webhook-secret"] === "secret_123" || headers["authorization"] === "Bearer secret_123";
+    },
+    verifyWorkerAuth: ({ headers = {}, querySecret = "" } = {}) => {
+      const auth = (headers["authorization"] || "").replace(/^Bearer\s+/i, "");
+      const cronSec = headers["x-cron-secret"] || "";
+      const secret = auth || cronSec || querySecret;
+      return secret === "cron_secret_123" || secret === "secret_123";
+    },
     handleWebhookEvent: async ({ payload }) => ({ indexed: payload.$id }),
     syncSingleArticle: async (id, action) => ({ synced: id, action }),
     drainQueue: async () => ({ processed: 2, successes: 2, failures: 0 }),
@@ -45,6 +54,7 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
     OPENROUTER_CHAT_MODEL: "openai/gpt-4o-mini",
     QDRANT_COLLECTION_NAME: "storynest",
     WEBHOOK_SECRET: "secret_123",
+    CRON_SECRET: "cron_secret_123",
   };
 
   // Mock response builder
@@ -276,7 +286,7 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
     );
   });
 
-  test("handles GET /api/jobs/worker when authenticated or via Vercel Cron", async () => {
+  test("handles GET /api/jobs/worker when authenticated with Bearer CRON_SECRET", async () => {
     const handler = createRequestHandler({
       env: mockEnv,
       ragQueryService: mockRagService,
@@ -288,7 +298,7 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
       url: "/api/jobs/worker",
       headers: {
         host: "storynest-rag.vercel.app",
-        "x-vercel-cron": "1",
+        authorization: "Bearer cron_secret_123",
       },
     };
     const res = createMockResponse();
@@ -299,6 +309,31 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
     const json = JSON.parse(res.body);
     assert.equal(json.success, true);
     assert.equal(json.processed, 2);
+  });
+
+  test("rejects GET /api/jobs/worker when unauthenticated even if x-vercel-cron header is present", async () => {
+    const handler = createRequestHandler({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+
+    const req = {
+      method: "GET",
+      url: "/api/jobs/worker",
+      headers: {
+        host: "storynest-rag.vercel.app",
+        "x-vercel-cron": "1", // Spoofed or header without valid CRON_SECRET
+      },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 401);
+    const json = JSON.parse(res.body);
+    assert.equal(json.error, "Unauthorized");
+    assert.equal(json.message, "Invalid worker authorization");
   });
 
   test("handles GET /api/jobs/status returning job metrics safely", async () => {

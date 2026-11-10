@@ -6,6 +6,7 @@ describe("Environment Validation", () => {
   test("accepts valid full configuration", () => {
     const validConfig = {
       NODE_ENV: "production",
+      WEBHOOK_SECRET: "prod_webhook_secret_123",
       APPWRITE_ENDPOINT: "https://fra.cloud.appwrite.io/v1",
       APPWRITE_PROJECT_ID: "proj_123",
       APPWRITE_DATABASE_ID: "db_123",
@@ -70,6 +71,28 @@ describe("Environment Validation", () => {
 
     const result = envSchema.safeParse(badUrlConfig);
     assert.equal(result.success, false);
+  });
+
+  test("fails in production if WEBHOOK_SECRET is missing or empty", () => {
+    const prodConfigWithoutSecret = {
+      NODE_ENV: "production",
+      APPWRITE_ENDPOINT: "https://fra.cloud.appwrite.io/v1",
+      APPWRITE_PROJECT_ID: "proj_123",
+      APPWRITE_DATABASE_ID: "db_123",
+      APPWRITE_COLLECTION_ID: "articles",
+      APPWRITE_API_KEY: "appwrite_secret_key",
+      QDRANT_URL: "https://cluster.qdrant.io:6333",
+      QDRANT_API_KEY: "qdrant_secret_key",
+      OPENROUTER_API_KEY: "openrouter_secret_key",
+    };
+
+    const result = envSchema.safeParse(prodConfigWithoutSecret);
+    assert.equal(result.success, false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === "WEBHOOK_SECRET");
+      assert.ok(issue, "Expected WEBHOOK_SECRET issue");
+      assert.ok(issue.message.includes("WEBHOOK_SECRET is required in production environment"));
+    }
   });
 });
 

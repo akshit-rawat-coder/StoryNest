@@ -68,9 +68,9 @@ export class SyncService {
    */
   safeCompare(a, b) {
     if (typeof a !== "string" || typeof b !== "string") return false;
-    const bufA = Buffer.from(a);
-    const bufB = Buffer.from(b);
-    if (bufA.length !== bufB.length) return false;
+    const bufA = Buffer.from(a, "utf8");
+    const bufB = Buffer.from(b, "utf8");
+    if (bufA.length === 0 || bufB.length === 0 || bufA.length !== bufB.length) return false;
     return crypto.timingSafeEqual(bufA, bufB);
   }
 
@@ -78,28 +78,89 @@ export class SyncService {
    * Verifies the webhook signature or secret header/query parameter.
    * Supports:
    * 1. Official Appwrite HMAC-SHA1 signature (X-Appwrite-Webhook-Signature)
-   * 2. Direct secret headers (X-Webhook-Secret, Authorization: Bearer <secret>)
+   *    computed as Base64 HMAC-SHA1(webhookUrl + rawBody, WEBHOOK_SECRET)
+   * 2. Direct custom secret headers (X-Webhook-Secret, Authorization: Bearer <secret>)
    * 3. Query string secret (?secret=<secret>)
    *
-   * @param {Object} headers
-   * @param {string} [querySecret]
-   * @param {string} [requestUrl] - Full request URL for HMAC verification
+   * Note: Direct string equality comparison between X-Appwrite-Webhook-Signature
+   * and WEBHOOK_SECRET is explicitly rejected.
+   *
+   * @param {Object|{headers?: Object, querySecret?: string, requestUrl?: string, rawBody?: string}} firstArg
+   * @param {string} [maybeQuerySecret]
+   * @param {string} [maybeRequestUrl]
+   * @param {string} [maybeRawBody]
    * @returns {boolean}
    */
-  verifyWebhookAuth(headers = {}, querySecret = "", requestUrl = "") {
+  verifyWebhookAuth(firstArg = {}, maybeQuerySecret = "", maybeRequestUrl = "", maybeRawBody = "") {
+    let headers;
+    let querySecret;
+    let requestUrl;
+    let rawBody;
+
+    if (
+      firstArg &&
+      typeof firstArg === "object" &&
+      ("headers" in firstArg || "rawBody" in firstArg || "requestUrl" in firstArg)
+    ) {
+      headers = firstArg.headers || {};
+      querySecret = firstArg.querySecret || "";
+      requestUrl = firstArg.requestUrl || "";
+      rawBody = firstArg.rawBody || "";
+    } else {
+      headers = firstArg || {};
+      querySecret = maybeQuerySecret || "";
+      requestUrl = maybeRequestUrl || "";
+      rawBody = maybeRawBody || "";
+    }
+
     const configuredSecret = this.env.WEBHOOK_SECRET;
     if (!configuredSecret) {
-      return true; // No secret configured
+      return false;
     }
 
-    // 1. Direct custom secret header
+    // 1. Official Appwrite Webhook Signature (HMAC-SHA1 of webhookUrl + rawBody in Base64)
+    const appwriteSignature = headers["x-appwrite-webhook-signature"] || "";
+    if (appwriteSignature) {
+      // Must NOT accept direct equality comparison with WEBHOOK_SECRET
+      try {
+        const expectedBase64 = crypto
+          .createHmac("sha1", configuredSecret)
+          .update(requestUrl + rawBody)
+          .digest("base64");
+
+        if (this.safeCompare(appwriteSignature, expectedBase64)) {
+          return true;
+        }
+
+        // Check for edge cases where reverse proxy protocol might differ (http vs https)
+        if (requestUrl.startsWith("http://")) {
+          const httpsUrl = requestUrl.replace(/^http:\/\//, "https://");
+          const expectedHttps = crypto
+            .createHmac("sha1", configuredSecret)
+            .update(httpsUrl + rawBody)
+            .digest("base64");
+          if (this.safeCompare(appwriteSignature, expectedHttps)) {
+            return true;
+          }
+        } else if (requestUrl.startsWith("https://")) {
+          const httpUrl = requestUrl.replace(/^https:\/\//, "http://");
+          const expectedHttp = crypto
+            .createHmac("sha1", configuredSecret)
+            .update(httpUrl + rawBody)
+            .digest("base64");
+          if (this.safeCompare(appwriteSignature, expectedHttp)) {
+            return true;
+          }
+        }
+      } catch {
+        // Fall through
+      }
+      return false;
+    }
+
+    // 2. Direct custom secret header (X-Webhook-Secret)
     const directHeader = headers["x-webhook-secret"] || "";
     if (directHeader && this.safeCompare(directHeader, configuredSecret)) {
-      return true;
-    }
-
-    // 2. Query parameter
-    if (querySecret && this.safeCompare(querySecret, configuredSecret)) {
       return true;
     }
 
@@ -109,39 +170,40 @@ export class SyncService {
       return true;
     }
 
-    // 4. Official Appwrite Webhook Signature (HMAC-SHA1 of request URL)
-    const appwriteSignature = headers["x-appwrite-webhook-signature"] || "";
-    if (appwriteSignature) {
-      // In Appwrite, if the signature header contains the secret directly:
-      if (this.safeCompare(appwriteSignature, configuredSecret)) {
-        return true;
-      }
-
-      // If signed with HMAC-SHA1:
-      if (requestUrl) {
-        try {
-          const expectedHex = crypto
-            .createHmac("sha1", configuredSecret)
-            .update(requestUrl)
-            .digest("hex");
-          const expectedBase64 = crypto
-            .createHmac("sha1", configuredSecret)
-            .update(requestUrl)
-            .digest("base64");
-
-          if (
-            this.safeCompare(appwriteSignature, expectedHex) ||
-            this.safeCompare(appwriteSignature, expectedBase64)
-          ) {
-            return true;
-          }
-        } catch {
-          // Fall through
-        }
-      }
+    // 4. Query parameter (?secret=...)
+    if (querySecret && this.safeCompare(querySecret, configuredSecret)) {
+      return true;
     }
 
     return false;
+  }
+
+  /**
+   * Verifies authorization for the worker sweep endpoint.
+   * Matches against CRON_SECRET (or WEBHOOK_SECRET fallback).
+   * Note: X-Vercel-Cron: 1 alone is NOT accepted.
+   *
+   * @param {Object} [options]
+   * @param {Object} [options.headers]
+   * @param {string} [options.querySecret]
+   * @returns {boolean}
+   */
+  verifyWorkerAuth({ headers = {}, querySecret = "" } = {}) {
+    const expectedSecret = this.env.CRON_SECRET || this.env.WEBHOOK_SECRET;
+    if (!expectedSecret) {
+      return false;
+    }
+
+    const authHeader = (headers["authorization"] || "").replace(/^Bearer\s+/i, "");
+    const cronSecretHeader = headers["x-cron-secret"] || "";
+    const webhookSecretHeader = headers["x-webhook-secret"] || "";
+    const candidateSecret = authHeader || cronSecretHeader || webhookSecretHeader || querySecret;
+
+    if (!candidateSecret) {
+      return false;
+    }
+
+    return this.safeCompare(candidateSecret, expectedSecret);
   }
 
   /**

@@ -42,8 +42,17 @@ export const envSchema = z.object({
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
 
-  // Webhook & Automation Security
-  WEBHOOK_SECRET: z.string().default("storynest_rag_webhook_secret"),
+  // Webhook & Automation Security (no insecure default; strictly required in production)
+  WEBHOOK_SECRET: z.string().default(""),
+  CRON_SECRET: z.string().default(""),
+}).superRefine((data, ctx) => {
+  if (data.NODE_ENV === "production" && (!data.WEBHOOK_SECRET || !data.WEBHOOK_SECRET.trim())) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["WEBHOOK_SECRET"],
+      message: "WEBHOOK_SECRET is required in production environment",
+    });
+  }
 });
 
 /**

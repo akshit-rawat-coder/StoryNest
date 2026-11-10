@@ -206,23 +206,28 @@ export function createRequestHandler(options = {}) {
       req.socket?.remoteAddress ||
       "127.0.0.1";
 
-    // Helper to read JSON body (supports pre-parsed Vercel req.body AND stream)
-    const readJsonBody = () =>
+    // Helper to read raw body and parsed JSON (supports pre-parsed Vercel req.body AND stream)
+    const readRequestBody = () =>
       new Promise((resolve, reject) => {
-        // Handle pre-parsed body from Vercel / middleware
+        // Handle pre-parsed body from Vercel / serverless middleware
         if (req.body !== undefined && req.body !== null) {
-          if (typeof req.body === "object") {
-            return resolve(req.body);
-          }
           if (typeof req.body === "string") {
-            if (!req.body.trim()) return resolve({});
-            try {
-              return resolve(JSON.parse(req.body));
-            } catch {
-              const err = new Error("Invalid JSON body");
-              err.status = 400;
-              return reject(err);
+            let parsed = {};
+            if (req.body.trim()) {
+              try {
+                parsed = JSON.parse(req.body);
+              } catch {
+                const err = new Error("Invalid JSON body");
+                err.status = 400;
+                return reject(err);
+              }
             }
+            return resolve({ parsed, rawBody: req.body });
+          }
+          if (typeof req.body === "object") {
+            const rawBody =
+              typeof req.rawBody === "string" ? req.rawBody : JSON.stringify(req.body);
+            return resolve({ parsed: req.body, rawBody });
           }
         }
 
@@ -234,7 +239,7 @@ export function createRequestHandler(options = {}) {
           return reject(err);
         }
 
-        let bodyString = "";
+        let rawBody = "";
         let bytesReceived = 0;
 
         req.on("data", (chunk) => {
@@ -245,25 +250,30 @@ export function createRequestHandler(options = {}) {
             req.destroy();
             return reject(err);
           }
-          bodyString += chunk;
+          rawBody += chunk.toString("utf8");
         });
 
         req.on("end", () => {
-          if (!bodyString.trim()) {
-            return resolve({});
+          let parsed = {};
+          if (rawBody.trim()) {
+            try {
+              parsed = JSON.parse(rawBody);
+            } catch {
+              const err = new Error("Invalid JSON body");
+              err.status = 400;
+              return reject(err);
+            }
           }
-          try {
-            const parsed = JSON.parse(bodyString);
-            resolve(parsed);
-          } catch {
-            const err = new Error("Invalid JSON body");
-            err.status = 400;
-            reject(err);
-          }
+          resolve({ parsed, rawBody });
         });
 
         req.on("error", (err) => reject(err));
       });
+
+    const readJsonBody = async () => {
+      const { parsed } = await readRequestBody();
+      return parsed;
+    };
 
     // 2. Health Endpoint
     if (req.method === "GET" && pathname === "/api/health") {
@@ -326,8 +336,28 @@ export function createRequestHandler(options = {}) {
 
     // 4. POST /api/webhooks/appwrite Endpoint
     if (req.method === "POST" && pathname === "/api/webhooks/appwrite") {
-      const fullUrl = `https://${host}${url.pathname}${url.search}`;
-      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      const fullUrl = `${proto}://${host}${url.pathname}${url.search}`;
+
+      let body;
+      let rawBody;
+      try {
+        const result = await readRequestBody();
+        body = result.parsed;
+        rawBody = result.rawBody;
+      } catch (err) {
+        res.writeHead(err.status || 400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Invalid request body" }));
+        return;
+      }
+
+      const isAuthValid = syncService.verifyWebhookAuth({
+        headers: req.headers,
+        querySecret,
+        requestUrl: fullUrl,
+        rawBody,
+      });
+
       if (!isAuthValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid webhook signature or secret" }));
@@ -335,7 +365,6 @@ export function createRequestHandler(options = {}) {
       }
 
       try {
-        const body = await readJsonBody();
         const event =
           req.headers["x-appwrite-webhook-event"] ||
           body.event ||
@@ -355,8 +384,28 @@ export function createRequestHandler(options = {}) {
 
     // 5. POST /api/articles/sync-single Endpoint
     if (req.method === "POST" && pathname === "/api/articles/sync-single") {
-      const fullUrl = `https://${host}${url.pathname}${url.search}`;
-      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      const fullUrl = `${proto}://${host}${url.pathname}${url.search}`;
+
+      let body;
+      let rawBody;
+      try {
+        const result = await readRequestBody();
+        body = result.parsed;
+        rawBody = result.rawBody;
+      } catch (err) {
+        res.writeHead(err.status || 400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Invalid request body" }));
+        return;
+      }
+
+      const isAuthValid = syncService.verifyWebhookAuth({
+        headers: req.headers,
+        querySecret,
+        requestUrl: fullUrl,
+        rawBody,
+      });
+
       if (!isAuthValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid authorization" }));
@@ -364,7 +413,6 @@ export function createRequestHandler(options = {}) {
       }
 
       try {
-        const body = await readJsonBody();
         const { articleId, action = "upsert" } = body;
         if (!articleId) {
           res.writeHead(400, { "Content-Type": "application/json" });
@@ -385,14 +433,24 @@ export function createRequestHandler(options = {}) {
 
     // 6. POST / GET /api/jobs/worker (Worker sweep for pending & retry-due jobs)
     if ((req.method === "POST" || req.method === "GET") && pathname === "/api/jobs/worker") {
-      const fullUrl = `https://${host}${url.pathname}${url.search}`;
-      // Vercel Cron automatically sends header 'x-vercel-cron': '1' or authorization
-      const isCron = req.headers["x-vercel-cron"] === "1";
-      const isAuthValid = isCron || syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
+      const isAuthValid =
+        typeof syncService.verifyWorkerAuth === "function"
+          ? syncService.verifyWorkerAuth({ headers: req.headers, querySecret })
+          : (() => {
+              const expectedSecret = env.CRON_SECRET || env.WEBHOOK_SECRET;
+              if (!expectedSecret) return false;
+              const authHeader = (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "");
+              const cronHeader = req.headers["x-cron-secret"] || "";
+              const webhookHeader = req.headers["x-webhook-secret"] || "";
+              const token = authHeader || cronHeader || webhookHeader || querySecret;
+              return typeof syncService.safeCompare === "function"
+                ? syncService.safeCompare(token, expectedSecret)
+                : token === expectedSecret;
+            })();
 
       if (!isAuthValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid authorization" }));
+        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid worker authorization" }));
         return;
       }
 
@@ -426,8 +484,26 @@ export function createRequestHandler(options = {}) {
 
     // 8. POST /api/sync/reconcile (Reconciles Appwrite with Qdrant)
     if (req.method === "POST" && pathname === "/api/sync/reconcile") {
-      const fullUrl = `https://${host}${url.pathname}${url.search}`;
-      const isAuthValid = syncService.verifyWebhookAuth(req.headers, querySecret, fullUrl);
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      const fullUrl = `${proto}://${host}${url.pathname}${url.search}`;
+
+      let body = {};
+      let rawBody = "";
+      try {
+        const result = await readRequestBody();
+        body = result.parsed || {};
+        rawBody = result.rawBody || "";
+      } catch {
+        // empty body is acceptable for reconcile
+      }
+
+      const isAuthValid = syncService.verifyWebhookAuth({
+        headers: req.headers,
+        querySecret,
+        requestUrl: fullUrl,
+        rawBody,
+      });
+
       if (!isAuthValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid authorization" }));
@@ -435,7 +511,6 @@ export function createRequestHandler(options = {}) {
       }
 
       try {
-        const body = await readJsonBody().catch(() => ({}));
         const dryRun = Boolean(body?.dryRun);
         const reconcileStats = await syncService.reconcile({ dryRun });
         res.writeHead(200, { "Content-Type": "application/json" });

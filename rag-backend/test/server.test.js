@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createServer } from "../server.js";
 
 describe("HTTP Server Endpoint Tests", () => {
@@ -28,10 +29,32 @@ describe("HTTP Server Endpoint Tests", () => {
   };
 
   const mockSyncService = {
-    verifyWebhookAuth: (headers = {}, querySecret = "") => {
-      const secret = headers["x-webhook-secret"] || querySecret;
+    verifyWebhookAuth: (firstArg = {}, maybeQuery = "") => {
+      const headers = firstArg.headers || firstArg;
+      const query = firstArg.querySecret || maybeQuery;
+      const rawBody = firstArg.rawBody || "";
+      const requestUrl = firstArg.requestUrl || "";
+
+      const appwriteSig = headers["x-appwrite-webhook-signature"];
+      if (appwriteSig) {
+        if (appwriteSig === "correct_secret") return false;
+        const expected = crypto
+          .createHmac("sha1", "correct_secret")
+          .update(requestUrl + rawBody)
+          .digest("base64");
+        return appwriteSig === expected;
+      }
+
+      const secret = headers["x-webhook-secret"] || query;
       return secret === "correct_secret";
     },
+    verifyWorkerAuth: ({ headers = {}, querySecret = "" } = {}) => {
+      const auth = (headers["authorization"] || "").replace(/^Bearer\s+/i, "");
+      const cronSec = headers["x-cron-secret"] || "";
+      const secret = auth || cronSec || querySecret;
+      return secret === "correct_secret";
+    },
+    drainQueue: async () => ({ processed: 1, successes: 1, failures: 0 }),
     handleWebhookEvent: async ({ event, payload }) => {
       return { eventHandled: event, articleId: payload.$id };
     },
@@ -245,6 +268,93 @@ describe("HTTP Server Endpoint Tests", () => {
     const data = await res.json();
     assert.equal(data.success, true);
     assert.equal(data.result.syncedArticleId, "art_99");
+    server.close();
+  });
+
+  test("POST /api/webhooks/appwrite verifies HMAC-SHA1 signature and rejects modified body", async () => {
+    const server = createServer({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+    await new Promise((resolve) => server.listen(0, resolve));
+    const port = server.address().port;
+
+    const fullUrl = `https://127.0.0.1:${port}/api/webhooks/appwrite`;
+    const payloadBody = JSON.stringify({ $id: "doc_sig_1", title: "Valid Signature" });
+    const validSignature = crypto
+      .createHmac("sha1", "correct_secret")
+      .update(fullUrl + payloadBody)
+      .digest("base64");
+
+    // 1. Valid signature -> 200
+    const resValid = await fetch(`http://127.0.0.1:${port}/api/webhooks/appwrite`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Appwrite-Webhook-Signature": validSignature,
+        "X-Forwarded-Proto": "https",
+      },
+      body: payloadBody,
+    });
+    assert.equal(resValid.status, 200);
+
+    // 2. Tampered body with original signature -> 401
+    const resTampered = await fetch(`http://127.0.0.1:${port}/api/webhooks/appwrite`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Appwrite-Webhook-Signature": validSignature,
+        "X-Forwarded-Proto": "https",
+      },
+      body: JSON.stringify({ $id: "doc_sig_1", title: "Tampered Body" }),
+    });
+    assert.equal(resTampered.status, 401);
+
+    // 3. Direct secret sent in signature header -> rejected with 401
+    const resDirectSecret = await fetch(`http://127.0.0.1:${port}/api/webhooks/appwrite`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Appwrite-Webhook-Signature": "correct_secret",
+        "X-Forwarded-Proto": "https",
+      },
+      body: payloadBody,
+    });
+    assert.equal(resDirectSecret.status, 401);
+
+    server.close();
+  });
+
+  test("GET /api/jobs/worker rejects request with x-vercel-cron: 1 alone and requires CRON_SECRET", async () => {
+    const server = createServer({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+    await new Promise((resolve) => server.listen(0, resolve));
+    const port = server.address().port;
+
+    // x-vercel-cron: 1 alone -> 401 Unauthorized
+    const resUnauthorized = await fetch(`http://127.0.0.1:${port}/api/jobs/worker`, {
+      method: "GET",
+      headers: {
+        "X-Vercel-Cron": "1",
+      },
+    });
+    assert.equal(resUnauthorized.status, 401);
+
+    // With Authorization: Bearer correct_secret -> 200
+    const resAuthorized = await fetch(`http://127.0.0.1:${port}/api/jobs/worker`, {
+      method: "GET",
+      headers: {
+        Authorization: "Bearer correct_secret",
+      },
+    });
+    assert.equal(resAuthorized.status, 200);
+    const data = await resAuthorized.json();
+    assert.equal(data.success, true);
+
     server.close();
   });
 });
