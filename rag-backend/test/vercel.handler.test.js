@@ -177,5 +177,95 @@ describe("Vercel Serverless Handler Adapter Tests", () => {
     assert.equal(json.success, true);
     assert.equal(json.result.indexed, "doc_99");
   });
+
+  test("handles Vercel rewrite URL with path query parameter (?path=api/ask)", async () => {
+    const handler = createRequestHandler({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+
+    const req = {
+      method: "POST",
+      url: "/index.js?path=api/ask",
+      headers: { host: "storynest-rag.vercel.app" },
+      body: { question: "What is StoryNest?", mode: "all" },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    const json = JSON.parse(res.body);
+    assert.ok(json.answer);
+  });
+
+  test("handles Vercel rewrite URL using x-matched-path header", async () => {
+    const handler = createRequestHandler({
+      env: mockEnv,
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+
+    const req = {
+      method: "GET",
+      url: "/index.js",
+      headers: {
+        host: "storynest-rag.vercel.app",
+        "x-matched-path": "/api/health",
+      },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    const json = JSON.parse(res.body);
+    assert.equal(json.status, "ok");
+  });
+
+  test("enforces CORS for production domain and rejects arbitrary domains", async () => {
+    const handler = createRequestHandler({
+      env: { ...mockEnv, CORS_ORIGIN: "http://localhost:5173" },
+      ragQueryService: mockRagService,
+      syncService: mockSyncService,
+    });
+
+    // Allowed production origin
+    const reqAllowed = {
+      method: "OPTIONS",
+      url: "/api/ask",
+      headers: {
+        host: "storynest-rag.vercel.app",
+        origin: "https://story-nest-theta.vercel.app",
+      },
+    };
+    const resAllowed = createMockResponse();
+    await handler(reqAllowed, resAllowed);
+
+    assert.equal(resAllowed.statusCode, 204);
+    assert.equal(
+      resAllowed.headers["access-control-allow-origin"],
+      "https://story-nest-theta.vercel.app"
+    );
+
+    // Arbitrary origin rejection (falls back to configured CORS_ORIGIN)
+    const reqRejected = {
+      method: "OPTIONS",
+      url: "/api/ask",
+      headers: {
+        host: "storynest-rag.vercel.app",
+        origin: "https://arbitrary-attacker.vercel.app",
+      },
+    };
+    const resRejected = createMockResponse();
+    await handler(reqRejected, resRejected);
+
+    assert.equal(resRejected.statusCode, 204);
+    assert.equal(
+      resRejected.headers["access-control-allow-origin"],
+      "http://localhost:5173"
+    );
+  });
 });
 

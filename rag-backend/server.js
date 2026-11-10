@@ -113,14 +113,26 @@ export function createRequestHandler(options = {}) {
   const MAX_BODY_BYTES = 500 * 1024; // 500 KB limit for webhooks/queries
 
   return async function requestHandler(req, res) {
-    // 1. CORS Configuration
+    // 1. CORS Configuration:
+    // Allows explicitly configured CORS_ORIGIN values, production domain (https://story-nest-theta.vercel.app),
+    // and localhost / 127.0.0.1 for local development.
     const requestOrigin = req.headers.origin || "";
-    const allowedOrigin = env.CORS_ORIGIN === "*" ? "*" : env.CORS_ORIGIN;
+    const configuredOrigins = (env.CORS_ORIGIN || "*")
+      .split(",")
+      .map((o) => o.trim())
+      .filter(Boolean);
 
-    if (allowedOrigin === "*" || requestOrigin === allowedOrigin) {
-      res.setHeader("Access-Control-Allow-Origin", requestOrigin || allowedOrigin);
+    const isAllowedOrigin =
+      configuredOrigins.includes("*") ||
+      configuredOrigins.includes(requestOrigin) ||
+      requestOrigin === "https://story-nest-theta.vercel.app" ||
+      /^http:\/\/localhost(:\d+)?$/.test(requestOrigin) ||
+      /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(requestOrigin);
+
+    if (isAllowedOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", requestOrigin || "*");
     } else {
-      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Access-Control-Allow-Origin", configuredOrigins[0] || "*");
     }
 
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
@@ -139,7 +151,19 @@ export function createRequestHandler(options = {}) {
 
     const host = req.headers.host || "127.0.0.1";
     const url = new URL(req.url, `http://${host}`);
-    const rawPath = url.pathname;
+
+    // Resolve true requested path:
+    // 1. Query parameter from Vercel rewrite (?path=...)
+    // 2. Vercel / reverse-proxy header (x-matched-path, x-forwarded-uri)
+    // 3. Direct url.pathname (local server / direct execution)
+    const rawPath = (
+      url.searchParams.get("path") ||
+      req.headers["x-matched-path"] ||
+      req.headers["x-forwarded-uri"] ||
+      url.pathname
+    )
+      .split("?")[0]
+      .replace(/\/index\.js$/, "");
 
     // Fast 204 for browser favicon probes
     if (rawPath === "/favicon.ico") {
@@ -149,12 +173,13 @@ export function createRequestHandler(options = {}) {
     }
 
     // Normalize path to support root / (health), /api/* and /* paths
+    const normalized = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
     const pathname =
-      rawPath === "/"
+      normalized === "/" || normalized === ""
         ? "/api/health"
-        : rawPath.startsWith("/api")
-        ? rawPath
-        : `/api${rawPath}`;
+        : normalized.startsWith("/api")
+          ? normalized
+          : `/api${normalized}`;
     const querySecret = url.searchParams.get("secret") || "";
 
     const clientIp =

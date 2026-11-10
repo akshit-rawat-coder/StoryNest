@@ -88,18 +88,28 @@ class RagService {
         contextArticleId: data.contextArticleId || (mode === "article" ? contextArticleId : null),
       };
     } catch (error) {
+      // Safe diagnostic logging (no sensitive secrets, logs endpoint and failure reason)
+      console.warn("[AskStoryNest] Request failed:", {
+        endpoint: `${this.baseUrl}/api/ask`,
+        error: error.message,
+      });
+
       if (error.name === "AbortError") {
         throw new Error("The request timed out. Please try again with a shorter question.");
       }
 
-      // Check for connection refused / offline server
+      // Check for connection refused / CORS / offline server
       if (
         error.message?.includes("Failed to fetch") ||
         error.message?.includes("NetworkError") ||
         error.message?.includes("connection refused")
       ) {
+        const isLocal =
+          this.baseUrl.includes("localhost") || this.baseUrl.includes("127.0.0.1");
         throw new Error(
-          "Ask StoryNest is currently offline. Please ensure the backend server is running on port 3001."
+          isLocal
+            ? "Ask StoryNest is currently offline. Please ensure the backend server is running on port 3001."
+            : `Unable to connect to the Ask StoryNest service at ${this.baseUrl}. Please verify that the backend is online and CORS is configured.`
         );
       }
 
@@ -122,8 +132,16 @@ class RagService {
       if (response.ok) {
         return await response.json();
       }
+      console.warn("[AskStoryNest] Health check returned non-200:", {
+        endpoint: `${this.baseUrl}/api/health`,
+        status: response.status,
+      });
       return null;
-    } catch {
+    } catch (err) {
+      console.warn("[AskStoryNest] Health check failed to connect:", {
+        endpoint: `${this.baseUrl}/api/health`,
+        error: err.message,
+      });
       return null;
     }
   }
