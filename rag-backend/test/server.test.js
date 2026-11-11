@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createServer } from "../server.js";
+import { OpenRouterChatService } from "../services/chat.service.js";
 
 describe("HTTP Server Endpoint Tests", () => {
   const mockRagService = {
@@ -136,6 +137,43 @@ describe("HTTP Server Endpoint Tests", () => {
     assert.equal(data.sources.length, 1);
     assert.equal(data.sources[0].title, "Test Article");
     assert.equal(data.insufficientContext, false);
+
+    server.close();
+  });
+
+  test("POST /api/ask returns a friendly 503 for insufficient OpenRouter credits", async () => {
+    const chatService = new OpenRouterChatService({
+      apiKey: "test-key",
+      fetchFn: async () => ({
+        ok: false,
+        status: 402,
+        text: async () => "provider response must not be returned",
+      }),
+    });
+    const server = createServer({
+      env: mockEnv,
+      ragQueryService: {
+        ask: async () => chatService.generateAnswer({
+          question: "Explain edge computing",
+          chunks: [{ title: "Test", category: "Tech", chunkText: "Edge processing." }],
+        }),
+      },
+      syncService: mockSyncService,
+    });
+    await new Promise((resolve) => server.listen(0, resolve));
+    const port = server.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: "Explain edge computing" }),
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.equal(data.error, "AI service unavailable");
+    assert.match(data.message, /insufficient available credits/i);
+    assert.doesNotMatch(JSON.stringify(data), /provider response must not be returned/i);
 
     server.close();
   });

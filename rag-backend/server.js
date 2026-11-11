@@ -335,6 +335,17 @@ export function createRequestHandler(options = {}) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch (err) {
+        if (err.name === "OpenRouterCreditsError") {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "AI service unavailable",
+              message: err.message,
+            })
+          );
+          return;
+        }
+
         if (err.status) {
           res.writeHead(err.status, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: err.message }));

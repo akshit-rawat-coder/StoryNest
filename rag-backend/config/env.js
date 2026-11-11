@@ -2,6 +2,7 @@ import { z } from "zod";
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_OPENROUTER_CHAT_MAX_TOKENS } from "./defaults.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,7 +35,7 @@ export const envSchema = z.object({
 
   // OpenRouter Chat Model for RAG Synthesis
   OPENROUTER_CHAT_MODEL: z.string().min(1).default("openai/gpt-4o-mini"),
-  OPENROUTER_CHAT_MAX_TOKENS: z.coerce.number().int().positive().default(1000),
+  OPENROUTER_CHAT_MAX_TOKENS: z.coerce.number().int().positive().default(DEFAULT_OPENROUTER_CHAT_MAX_TOKENS),
 
   // RAG Search Configuration
   SIMILARITY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.35),

@@ -1,3 +1,5 @@
+import { DEFAULT_OPENROUTER_CHAT_MAX_TOKENS } from "../config/defaults.js";
+
 /**
  * OpenRouter Chat Completion Service for grounded RAG answer synthesis.
  */
@@ -14,7 +16,7 @@ export class OpenRouterChatService {
     apiKey,
     model = "openai/gpt-4o-mini",
     baseUrl = "https://openrouter.ai/api/v1",
-    maxTokens = 1000,
+    maxTokens = DEFAULT_OPENROUTER_CHAT_MAX_TOKENS,
     fetchFn = globalThis.fetch,
   }) {
     if (!apiKey) {
@@ -140,6 +142,19 @@ export class OpenRouterChatService {
       });
 
       if (!response.ok) {
+        if (response.status === 402) {
+          console.error(
+            "[OpenRouter] Chat completion unavailable",
+            JSON.stringify({ status: 402, reason: "insufficient_credits" })
+          );
+          const error = new Error(
+            "The AI service currently has insufficient available credits. Please try again later."
+          );
+          error.name = "OpenRouterCreditsError";
+          error.status = 503;
+          throw error;
+        }
+
         const errorText = await response.text();
         if (response.status === 429 && attempt < 3) {
           const delay = attempt * 1500;

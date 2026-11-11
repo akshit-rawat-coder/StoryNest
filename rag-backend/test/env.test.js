@@ -44,6 +44,21 @@ describe("Environment Validation", () => {
     assert.equal(parsed.QDRANT_COLLECTION_NAME, "storynest");
     assert.equal(parsed.OPENROUTER_EMBEDDING_MODEL, "openai/text-embedding-3-small");
     assert.equal(parsed.OPENROUTER_BASE_URL, "https://openrouter.ai/api/v1");
+    assert.equal(parsed.OPENROUTER_CHAT_MAX_TOKENS, 800);
+  });
+
+  test("allows overriding the OpenRouter chat token limit", () => {
+    const config = {
+      APPWRITE_PROJECT_ID: "proj_123",
+      APPWRITE_DATABASE_ID: "db_123",
+      APPWRITE_API_KEY: "key_123",
+      QDRANT_URL: "https://cluster.qdrant.io:6333",
+      QDRANT_API_KEY: "q_key",
+      OPENROUTER_API_KEY: "or_key",
+      OPENROUTER_CHAT_MAX_TOKENS: "640",
+    };
+
+    assert.equal(envSchema.parse(config).OPENROUTER_CHAT_MAX_TOKENS, 640);
   });
 
   test("preserves backward compatibility when only APPWRITE_COLLECTION_ID is set", () => {
